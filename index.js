@@ -21,11 +21,11 @@ const {
 
 // === إعداد خادم ويب لـ Render ===
 const web = express();
-web.get('/', (_req, res) => res.status(200).send('✅ البوت يعمل بنجاح مع حفظ البيانات المؤمّن'));
+web.get('/', (_req, res) => res.status(200).send('✅ البوت يعمل بنجاح'));
 web.get('/health', (_req, res) => res.json({ ok: true }));
 web.listen(Number(process.env.PORT) || 3000, '0.0.0.0');
 
-// === نظام حفظ البيانات المزدوج والمؤمن ضد الضياع ===
+// === نظام حفظ البيانات المزدوج والمؤمن ===
 const DATA_FILE = path.join(__dirname, 'data.json');
 const BACKUP_FILE = path.join(__dirname, 'data_backup.json');
 
@@ -81,7 +81,7 @@ function saveData(data) {
   try {
     const jsonString = JSON.stringify(data, null, 2);
     fs.writeFileSync(DATA_FILE, jsonString);
-    fs.writeFileSync(BACKUP_FILE, jsonString); // حفظ احتياطي فوري
+    fs.writeFileSync(BACKUP_FILE, jsonString);
     return true;
   } catch (err) {
     console.error('❌ خطأ في حفظ البيانات:', err.message);
@@ -92,10 +92,10 @@ function saveData(data) {
 // === العناصر والمعدات ===
 const WEAPONS = {
   knife: { name: 'سكين حاد 🔪', price: 500, desc: 'سلاح خفيف يزيد نسبة النجاح قليلاً' },
-  pistol: { name: 'مسدس 9mm 🔫', price: 2000, desc: 'مسدس أساسي للعمليات والخطف' },
-  smg: { name: 'رشاش قصير 🪖', price: 7000, desc: 'رشاش قوي مخصص للاغتيالات واقتحام المناطق' },
+  pistol: { name: 'مسدس 9mm 🔫', price: 2000, desc: 'مسدس أساسي يزيد نسبة الخطف بـ 15%' },
+  smg: { name: 'رشاش قصير 🪖', price: 7000, desc: 'رشاش قوي مخصص للاغتيالات والحروب' },
   armor: { name: 'درع واقي 🛡️', price: 4000, desc: 'يحميك من الغرامات والسجن عند الفشل' },
-  car: { name: 'سيارة هرب سريعة 🏎️', price: 15000, desc: 'تزيد فرص الخطف والفرار من الشرطة بنجاح!' }
+  car: { name: 'سيارة هرب سريعة 🏎️', price: 15000, desc: 'تزيد نسبة الخطف والفرار بـ 15% إضافية!' }
 };
 
 const client = new Client({
@@ -109,7 +109,7 @@ const client = new Client({
 
 client.commands = new Collection();
 
-// === الأوامر التفاعلية ===
+// === تسجيل كافة الأوامر البرمجية ===
 const commands = [
   new SlashCommandBuilder()
     .setName('قائمة')
@@ -152,12 +152,12 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('غسيل_أموال')
-    .setDescription('تبييض وتحويل الأموال السوداء لتأمينها من المصادرة (خصم 15% رسوم)')
+    .setDescription('تبييض وتحويل الأموال لتأمينها من المصادرة (رسوم 15%)')
     .addIntegerOption(opt => opt.setName('المبلغ').setDescription('المبلغ المراد تبييضه').setRequired(true)),
 
   new SlashCommandBuilder()
     .setName('خطف')
-    .setDescription('محاولة خطف لاعب واشتراط فدية مالية لإطلاقه')
+    .setDescription('محاولة خطف لاعب باشتراط فدية مالية (نسبة نجاح عالية!)')
     .addUserOption(opt => opt.setName('الهدف').setDescription('الشخص المراد خطفه').setRequired(true))
     .addIntegerOption(opt => opt.setName('الفدية').setDescription('المبلغ المطلوب للإفراج عنه').setRequired(true)),
 
@@ -190,12 +190,8 @@ const commands = [
         )),
 
   new SlashCommandBuilder()
-    .setName('مزاد')
-    .setDescription('عرض المزادات النشطة والمزايدة على العناصر النادرة'),
-
-  new SlashCommandBuilder()
     .setName('نرد')
-    .setDescription('مراهنة مالي في الكازينو على رمية النرد')
+    .setDescription('مراهنة مالية في الكازينو على رمية النرد')
     .addIntegerOption(opt => opt.setName('المبلغ').setDescription('المبلغ المراد المراهنة به').setRequired(true)),
 
   new SlashCommandBuilder()
@@ -248,7 +244,7 @@ client.once(Events.ClientReady, async () => {
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   try {
     await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-    console.log('✅ تم تسجيل وتحديث كافة الأوامر والأزرار بنجاح!');
+    console.log('✅ تم تسجيل وتحديث كافة الأوامر التفاعلية بنجاح!');
   } catch (error) {
     console.error('❌ خطأ في تحميل الأوامر:', error);
   }
@@ -308,7 +304,7 @@ client.on(Events.InteractionCreate, async interaction => {
         .setTitle(`📊 ملف المجرم: ${interaction.user.username}`)
         .addFields(
           { name: '💰 الرصيد النقدي', value: `${userData.balance.toLocaleString()} عملة`, inline: true },
-          { name: '🏦 الرصيد المبيض (النظيف)', value: `${userData.cleanBalance.toLocaleString()} عملة`, inline: true },
+          { name: '🏦 الرصيد المبيض', value: `${userData.cleanBalance.toLocaleString()} عملة`, inline: true },
           { name: '⭐ المستوى', value: `مستوى **${userData.level}** (${userData.xp} XP)`, inline: true },
           { name: '📌 الحالة الحالية', value: statusText, inline: true },
           { name: '🛡️ العصابة', value: userData.gang || 'بدون عصابة ❌', inline: true },
@@ -416,20 +412,70 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.reply({ embeds: [embed], components: [row1, row2] });
     }
 
+    case 'انضمام': {
+      return interaction.reply({ content: '✅ حسابك مفعل ومحفوظ بالفعل!', ephemeral: true });
+    }
+
+    case 'خطف': {
+      const targetUser = options.getUser('الهدف');
+      const ransom = options.getInteger('الفدية');
+
+      if (targetUser.id === user.id) return interaction.reply({ content: '❌ لا يمكنك خطف نفسك!', ephemeral: true });
+      if (ransom <= 0) return interaction.reply({ content: '❌ يجب تحديد مبلغ فدية منطقي!', ephemeral: true });
+
+      initUser(data, targetUser.id);
+      const targetData = data.users[targetUser.id];
+      if (targetData.kidnappedBy) return interaction.reply({ content: '❌ هذا الشخص مخطوف بالفعل!', ephemeral: true });
+
+      // 🎯 رفع فرصة النجاح الأساسية إلى 65% + المكافآت
+      let kidnapChance = 0.65;
+      if (userData.inventory.pistol > 0) kidnapChance += 0.15;
+      if (userData.inventory.car > 0) kidnapChance += 0.15;
+
+      if (Math.random() < kidnapChance) {
+        targetData.kidnappedBy = user.id;
+        targetData.ransomPrice = ransom;
+        saveData(data); // 🟢 حفظ فوري
+        return interaction.reply(`🗡️ **عملية خطف ناجحة!** احتجزت <@${targetUser.id}> باشتراط فدية **${ransom.toLocaleString()}** عملة! 🔥`);
+      } else {
+        return interaction.reply(`💥 **فشلت عملية الخطف!** تمكن <@${targetUser.id}> من الفرار!`);
+      }
+    }
+
+    case 'فدية': {
+      if (!userData.kidnappedBy) return interaction.reply({ content: '❌ أنت لست مخطوفاً!', ephemeral: true });
+
+      const ransom = userData.ransomPrice;
+      if (userData.balance < ransom) {
+        return interaction.reply({ content: `❌ لا تملك مبلغ الفدية المطلوبة (**${ransom.toLocaleString()}** عملة)!`, ephemeral: true });
+      }
+
+      const kidnapperId = userData.kidnappedBy;
+      initUser(data, kidnapperId);
+
+      userData.balance -= ransom;
+      data.users[kidnapperId].balance += ransom;
+      userData.kidnappedBy = null;
+      userData.ransomPrice = 0;
+
+      saveData(data); // 🟢 حفظ فوري
+      return interaction.reply(`🕊️ **تم دفع الفدية بنجاح!** دفعت **${ransom.toLocaleString()}** عملة واسترجعت حريتك!`);
+    }
+
     case 'غسيل_أموال': {
       const amount = options.getInteger('المبلغ');
       if (amount <= 0 || userData.balance < amount) {
         return interaction.reply({ content: '❌ رصيدك النقدي لا يكفي لتبييض هذا المبلغ!', ephemeral: true });
       }
 
-      const fee = Math.floor(amount * 0.15); // رسوم 15%
+      const fee = Math.floor(amount * 0.15);
       const cleanAmount = amount - fee;
 
       userData.balance -= amount;
       userData.cleanBalance += cleanAmount;
-      saveData(data); // 🟢 حفظ مؤمن
+      saveData(data);
 
-      return interaction.reply(`🧼 **تمت عملية غسيل الأموال بنجاح!**\nتم تحويل **${cleanAmount.toLocaleString()}** عملة لنظيفة وآمنة بالبنك (خصم رسوم: ${fee.toLocaleString()} عملة).`);
+      return interaction.reply(`🧼 **تمت عملية غسيل الأموال بنجاح!**\nتم تحويل **${cleanAmount.toLocaleString()}** عملة لنظيفة بالبنك (خصم رسوم: ${fee.toLocaleString()} عملة).`);
     }
 
     case 'تحدي_عصابة': {
@@ -446,7 +492,6 @@ client.on(Events.InteractionCreate, async interaction => {
       if (!enemyGang) return interaction.reply({ content: '❌ العصابة المنافسة غير موجودة!', ephemeral: true });
       if (myGang.bank < bet) return interaction.reply({ content: '❌ خزينة عصابتك لا تكفي لهذا الرهان!', ephemeral: true });
 
-      // معركة تلقائية بناءً على عدد الأعضاء وقوة السلاح
       const myPower = myGang.members.length * 10;
       const enemyPower = enemyGang.members.length * 10;
       const winChance = myPower / (myPower + enemyPower);
@@ -455,7 +500,7 @@ client.on(Events.InteractionCreate, async interaction => {
         myGang.bank += bet;
         enemyGang.bank = Math.max(0, enemyGang.bank - bet);
         saveData(data);
-        return interaction.reply(`💥 **انتصار ساحق في معركة العصابات!** هزمت عصابتك **[ ${myGang.name} ]** عصابة **[ ${enemyGangName} ]** وربحت **${bet.toLocaleString()}** عملة لخزينتكم! 🔥`);
+        return interaction.reply(`💥 **انتصار ساحق في معركة العصابات!** هزمت عصابتك **[ ${myGang.name} ]** عصابة **[ ${enemyGangName} ]** وربحت **${bet.toLocaleString()}** عملة! 🔥`);
       } else {
         myGang.bank = Math.max(0, myGang.bank - bet);
         enemyGang.bank += bet;
@@ -498,7 +543,7 @@ client.on(Events.InteractionCreate, async interaction => {
         const loot = Math.floor(Math.random() * 800) + 200 + (userData.level * 50);
         userData.balance += loot;
         const lvlUp = addXp(userData, 40);
-        saveData(data); // 🟢 حفظ فوري
+        saveData(data);
 
         let msg = `🥷 **عملية سطو ناجحة!** حصلت على **${loot.toLocaleString()}** عملة و **40 XP**! 💰`;
         if (lvlUp) msg += `\n🎉 **مبروك! ارتفع مستواك إلى المستوى ${userData.level}!**`;
@@ -512,55 +557,10 @@ client.on(Events.InteractionCreate, async interaction => {
           userData.jailUntil = now + (10 * 60 * 1000);
           const fine = Math.min(userData.balance, 300);
           userData.balance -= fine;
-          saveData(data); // 🟢 حفظ فوري
+          saveData(data);
           return interaction.reply(`🚨 **قبضت عليك الشرطة!** تم تغريمك **${fine.toLocaleString()}** عملة وسجنك **10 دقائق**! 🚔`);
         }
       }
-    }
-
-    case 'خطف': {
-      const targetUser = options.getUser('الهدف');
-      const ransom = options.getInteger('الفدية');
-
-      if (targetUser.id === user.id) return interaction.reply({ content: '❌ لا يمكنك خطف نفسك!', ephemeral: true });
-      if (ransom <= 0) return interaction.reply({ content: '❌ يجب تحديد مبلغ فدية منطقي!', ephemeral: true });
-
-      initUser(data, targetUser.id);
-      const targetData = data.users[targetUser.id];
-      if (targetData.kidnappedBy) return interaction.reply({ content: '❌ هذا الشخص مخطوف بالفعل!', ephemeral: true });
-
-      let kidnapChance = 0.35;
-      if (userData.inventory.pistol > 0) kidnapChance += 0.20;
-      if (userData.inventory.car > 0) kidnapChance += 0.25;
-
-      if (Math.random() < kidnapChance) {
-        targetData.kidnappedBy = user.id;
-        targetData.ransomPrice = ransom;
-        saveData(data);
-        return interaction.reply(`🗡️ **عملية خطف ناجحة!** احتجزت <@${targetUser.id}> باشتراط فدية **${ransom.toLocaleString()}** عملة! 🔥`);
-      } else {
-        return interaction.reply(`💥 **فشلت عملية الخطف!** تمكن <@${targetUser.id}> من الفرار!`);
-      }
-    }
-
-    case 'فدية': {
-      if (!userData.kidnappedBy) return interaction.reply({ content: '❌ أنت لست مخطوفاً!', ephemeral: true });
-
-      const ransom = userData.ransomPrice;
-      if (userData.balance < ransom) {
-        return interaction.reply({ content: `❌ لا تملك مبلغ الفدية المطلوبة (**${ransom.toLocaleString()}** عملة)!`, ephemeral: true });
-      }
-
-      const kidnapperId = userData.kidnappedBy;
-      initUser(data, kidnapperId);
-
-      userData.balance -= ransom;
-      data.users[kidnapperId].balance += ransom;
-      userData.kidnappedBy = null;
-      userData.ransomPrice = 0;
-
-      saveData(data);
-      return interaction.reply(`🕊️ **تم دفع الفدية بنجاح!** دفعت **${ransom.toLocaleString()}** عملة واسترجعت حريتك!`);
     }
 
     case 'اغتيال': {
