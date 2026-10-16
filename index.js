@@ -21,11 +21,11 @@ const {
 
 // === إعداد خادم ويب لـ Render ===
 const web = express();
-web.get('/', (_req, res) => res.status(200).send('✅ البوت يعمل بنجاح بكامل الميزات الشاملة'));
+web.get('/', (_req, res) => res.status(200).send('✅ البوت يعمل بنجاح مع حفظ البيانات المؤمّن'));
 web.get('/health', (_req, res) => res.json({ ok: true }));
 web.listen(Number(process.env.PORT) || 3000, '0.0.0.0');
 
-// === نظام حفظ البيانات المزدوج والمؤمن ===
+// === نظام حفظ البيانات المزدوج والمؤمن ضد الضياع ===
 const DATA_FILE = path.join(__dirname, 'data.json');
 const BACKUP_FILE = path.join(__dirname, 'data_backup.json');
 
@@ -38,6 +38,9 @@ function ensureDataFile() {
       const initialData = { 
         users: {}, 
         gangs: {}, 
+        auctions: [
+          { id: 1, name: '🏎️ سيارة مصفحة أسطورية', currentPrice: 20000, highestBidder: null, active: true }
+        ],
         territories: {
           bank: { name: '🏦 البنك المركزي', owner: null, tax: 2000 },
           port: { name: '🚢 الميناء المحصن', owner: null, tax: 1500 },
@@ -57,6 +60,7 @@ function readData() {
     const parsed = JSON.parse(raw);
     if (!parsed.gangs) parsed.gangs = {};
     if (!parsed.users) parsed.users = {};
+    if (!parsed.auctions) parsed.auctions = [];
     if (!parsed.territories) {
       parsed.territories = {
         bank: { name: '🏦 البنك المركزي', owner: null, tax: 2000 },
@@ -69,7 +73,7 @@ function readData() {
     if (fs.existsSync(BACKUP_FILE)) {
       return JSON.parse(fs.readFileSync(BACKUP_FILE, 'utf8'));
     }
-    return { users: {}, gangs: {}, territories: {}, settings: {} };
+    return { users: {}, gangs: {}, auctions: [], territories: {}, settings: {} };
   }
 }
 
@@ -77,7 +81,7 @@ function saveData(data) {
   try {
     const jsonString = JSON.stringify(data, null, 2);
     fs.writeFileSync(DATA_FILE, jsonString);
-    fs.writeFileSync(BACKUP_FILE, jsonString);
+    fs.writeFileSync(BACKUP_FILE, jsonString); // حفظ احتياطي فوري
     return true;
   } catch (err) {
     console.error('❌ خطأ في حفظ البيانات:', err.message);
@@ -147,22 +151,9 @@ const commands = [
     .setDescription('تنفيذ عملية سطو مسلح لجمع الأموال'),
 
   new SlashCommandBuilder()
-    .setName('احتلال')
-    .setDescription('محاولة السيطرة واحتلال إحدى مناطق المدينة لصالح عصابتك')
-    .addStringOption(opt =>
-      opt.setName('المنطقة')
-        .setDescription('اختر المنطقة المراد احتلالها')
-        .setRequired(true)
-        .addChoices(
-          { name: 'البنك المركزي (ضرائب: 2000)', value: 'bank' },
-          { name: 'الميناء المحصن (ضرائب: 1500)', value: 'port' },
-          { name: 'الملهى الليلي (ضرائب: 1000)', value: 'club' }
-        )),
-
-  new SlashCommandBuilder()
-    .setName('نرد')
-    .setDescription('مراهنة مالي في الكازينو على رمية النرد')
-    .addIntegerOption(opt => opt.setName('المبلغ').setDescription('المبلغ المراد المراهنة به').setRequired(true)),
+    .setName('غسيل_أموال')
+    .setDescription('تبييض وتحويل الأموال السوداء لتأمينها من المصادرة (خصم 15% رسوم)')
+    .addIntegerOption(opt => opt.setName('المبلغ').setDescription('المبلغ المراد تبييضه').setRequired(true)),
 
   new SlashCommandBuilder()
     .setName('خطف')
@@ -178,6 +169,34 @@ const commands = [
     .setName('اغتيال')
     .setDescription('تنفيذ عملية اغتيال ضد هدف لتجريده من جزء من رصيده')
     .addUserOption(opt => opt.setName('الهدف').setDescription('الشخص المراد اغتياله').setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName('تحدي_عصابة')
+    .setDescription('إعلان حرب وتحدي عصابة أخرى بمبلغ رهان محدد')
+    .addStringOption(opt => opt.setName('العصابة').setDescription('اسم العصابة المنافسة').setRequired(true))
+    .addIntegerOption(opt => opt.setName('الرهان').setDescription('مبلغ الرهان على المعركة').setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName('احتلال')
+    .setDescription('محاولة السيطرة واحتلال إحدى مناطق المدينة لصالح عصابتك')
+    .addStringOption(opt =>
+      opt.setName('المنطقة')
+        .setDescription('اختر المنطقة المراد احتلالها')
+        .setRequired(true)
+        .addChoices(
+          { name: 'البنك المركزي (ضرائب: 2000)', value: 'bank' },
+          { name: 'الميناء المحصن (ضرائب: 1500)', value: 'port' },
+          { name: 'الملهى الليلي (ضرائب: 1000)', value: 'club' }
+        )),
+
+  new SlashCommandBuilder()
+    .setName('مزاد')
+    .setDescription('عرض المزادات النشطة والمزايدة على العناصر النادرة'),
+
+  new SlashCommandBuilder()
+    .setName('نرد')
+    .setDescription('مراهنة مالي في الكازينو على رمية النرد')
+    .addIntegerOption(opt => opt.setName('المبلغ').setDescription('المبلغ المراد المراهنة به').setRequired(true)),
 
   new SlashCommandBuilder()
     .setName('السجن')
@@ -229,17 +248,17 @@ client.once(Events.ClientReady, async () => {
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   try {
     await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-    console.log('✅ تم تسجيل وتحديث الأوامر والأزرار التفاعلية بنجاح!');
+    console.log('✅ تم تسجيل وتحديث كافة الأوامر والأزرار بنجاح!');
   } catch (error) {
     console.error('❌ خطأ في تحميل الأوامر:', error);
   }
 });
 
-// === تجهيز حساب المستخدم ===
 function initUser(data, userId) {
   if (!data.users[userId]) {
     data.users[userId] = {
       balance: 1000,
+      cleanBalance: 0,
       xp: 0,
       level: 1,
       createdAt: new Date().toISOString(),
@@ -252,6 +271,7 @@ function initUser(data, userId) {
     };
   }
   const u = data.users[userId];
+  if (u.cleanBalance === undefined) u.cleanBalance = 0;
   if (u.xp === undefined) u.xp = 0;
   if (u.level === undefined) u.level = 1;
   if (!u.inventory) u.inventory = { knife: 0, pistol: 0, smg: 0, armor: 0, car: 0 };
@@ -267,7 +287,6 @@ function addXp(userData, amount) {
   return false;
 }
 
-// === التعامل مع التفاعلات والأزرار ===
 client.on(Events.InteractionCreate, async interaction => {
   const data = readData();
 
@@ -281,14 +300,15 @@ client.on(Events.InteractionCreate, async interaction => {
       for (const [k, v] of Object.entries(userData.inventory)) {
         if (v > 0) invText += `• ${WEAPONS[k].name}: **${v}**\n`;
       }
-      if (!invText) invText = 'لا توجد أسلحة أو مركبات';
+      if (!invText) invText = 'لا توجد أسلحة أو سيارات';
       const statusText = userData.kidnappedBy ? `⚠️ مخطوف من قبل <@${userData.kidnappedBy}>` : 'طليق وحر 🕊️';
 
       const embed = new EmbedBuilder()
         .setColor('#2ECC71')
         .setTitle(`📊 ملف المجرم: ${interaction.user.username}`)
         .addFields(
-          { name: '💰 الرصيد', value: `${userData.balance.toLocaleString()} عملة`, inline: true },
+          { name: '💰 الرصيد النقدي', value: `${userData.balance.toLocaleString()} عملة`, inline: true },
+          { name: '🏦 الرصيد المبيض (النظيف)', value: `${userData.cleanBalance.toLocaleString()} عملة`, inline: true },
           { name: '⭐ المستوى', value: `مستوى **${userData.level}** (${userData.xp} XP)`, inline: true },
           { name: '📌 الحالة الحالية', value: statusText, inline: true },
           { name: '🛡️ العصابة', value: userData.gang || 'بدون عصابة ❌', inline: true },
@@ -333,26 +353,30 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.reply({ content: '🕊️ **أنت حُر طليق!** لست مسجوناً.', ephemeral: true });
     }
 
+    if (interaction.customId === 'main_btn_kidnap_status') {
+      if (userData.kidnappedBy) {
+        return interaction.reply({ content: `🚨 **أنت مخطوف ومقيد!** الخاطف: <@${userData.kidnappedBy}>\nالفدية المطلوبة: **${userData.ransomPrice.toLocaleString()} عملة**.\nاستخدم \`/فدية\` لتحرير نفسك!`, ephemeral: true });
+      }
+      return interaction.reply({ content: '🛡️ **وضعك آمن!** لم يقم أحد بخطفك حالياً. يمكنك استخدام `/خطف` لتهديد أعدائك!', ephemeral: true });
+    }
+
     if (interaction.customId === 'main_btn_territories') {
       let text = '';
       for (const [key, t] of Object.entries(data.territories)) {
         const ownerText = t.owner ? `تسيطر عليها عصابة: **${t.owner}**` : 'حرة / غير محتلة 🔓';
         text += `• **${t.name}** — ${ownerText} (الأرباح: ${t.tax.toLocaleString()} عملة)\n`;
       }
-      const embed = new EmbedBuilder()
-        .setColor('#e67e22')
-        .setTitle('🗺️ خارطة نفوذ المناطق')
-        .setDescription(text + '\n*(استخدم الأمر `/احتلال [المنطقة]` للسيطرة مع عصابتك)*');
+      const embed = new EmbedBuilder().setColor('#e67e22').setTitle('🗺️ خارطة نفوذ المناطق').setDescription(text + '\n*(استخدم الأمر `/احتلال [المنطقة]` للسيطرة)*');
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
     if (interaction.customId === 'main_btn_casino') {
-      return interaction.reply({ content: '🎲 **أهلاً بك في كازينو العصابات!**\nاستخدم الأمر `/نرد [المبلغ]` للمراهنة على رمية النرد ومضاعفة أموالك!', ephemeral: true });
+      return interaction.reply({ content: '🎲 **كازينو العصابات!**\nاستخدم الأمر `/نرد [المبلغ]` للمراهنة على رمية النرد ومضاعفة أموالك!', ephemeral: true });
     }
 
     if (interaction.customId === 'main_btn_leaderboard') {
       const sortedUsers = Object.entries(data.users)
-        .map(([id, u]) => ({ id, balance: u.balance || 0, level: u.level || 1 }))
+        .map(([id, u]) => ({ id, balance: (u.balance || 0) + (u.cleanBalance || 0), level: u.level || 1 }))
         .sort((a, b) => b.balance - a.balance)
         .slice(0, 5);
 
@@ -363,7 +387,6 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
-  // === أوامر الشات ===
   if (!interaction.isChatInputCommand()) return;
   const { commandName, user, options } = interaction;
   initUser(data, user.id);
@@ -374,7 +397,7 @@ client.on(Events.InteractionCreate, async interaction => {
       const embed = new EmbedBuilder()
         .setColor('#e74c3c')
         .setTitle('🏛️ المركز الرئيسي واللوحة التفاعلية لعالم العصابات')
-        .setDescription('استخدم الأزرار التفاعلية أدناه للتحكم المباشر عبر جميع الأقسام والخدمات: 🔥');
+        .setDescription('استخدم الأزرار التفاعلية أدناه للتحكم المباشر عبر جميع الأقسام: 🔥');
 
       const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('main_btn_account').setLabel('💳 حسابي').setStyle(ButtonStyle.Primary),
@@ -384,12 +407,61 @@ client.on(Events.InteractionCreate, async interaction => {
       );
 
       const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('main_btn_kidnap_status').setLabel('🗡️ الخطف والفدية').setStyle(ButtonStyle.Danger),
         new ButtonBuilder().setCustomId('main_btn_territories').setLabel('🗺️ خريطة المناطق').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('main_btn_casino').setLabel('🎲 الكازينو والنرد').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('main_btn_leaderboard').setLabel('🏆 الصدارة').setStyle(ButtonStyle.Success)
       );
 
       return interaction.reply({ embeds: [embed], components: [row1, row2] });
+    }
+
+    case 'غسيل_أموال': {
+      const amount = options.getInteger('المبلغ');
+      if (amount <= 0 || userData.balance < amount) {
+        return interaction.reply({ content: '❌ رصيدك النقدي لا يكفي لتبييض هذا المبلغ!', ephemeral: true });
+      }
+
+      const fee = Math.floor(amount * 0.15); // رسوم 15%
+      const cleanAmount = amount - fee;
+
+      userData.balance -= amount;
+      userData.cleanBalance += cleanAmount;
+      saveData(data); // 🟢 حفظ مؤمن
+
+      return interaction.reply(`🧼 **تمت عملية غسيل الأموال بنجاح!**\nتم تحويل **${cleanAmount.toLocaleString()}** عملة لنظيفة وآمنة بالبنك (خصم رسوم: ${fee.toLocaleString()} عملة).`);
+    }
+
+    case 'تحدي_عصابة': {
+      const enemyGangName = options.getString('العصابة').trim();
+      const bet = options.getInteger('الرهان');
+
+      if (!userData.gang || !data.gangs[userData.gang]) {
+        return interaction.reply({ content: '❌ يجب أن تكون عضواً في عصابة لإعلان التحدي!', ephemeral: true });
+      }
+
+      const myGang = data.gangs[userData.gang];
+      const enemyGang = data.gangs[enemyGangName];
+
+      if (!enemyGang) return interaction.reply({ content: '❌ العصابة المنافسة غير موجودة!', ephemeral: true });
+      if (myGang.bank < bet) return interaction.reply({ content: '❌ خزينة عصابتك لا تكفي لهذا الرهان!', ephemeral: true });
+
+      // معركة تلقائية بناءً على عدد الأعضاء وقوة السلاح
+      const myPower = myGang.members.length * 10;
+      const enemyPower = enemyGang.members.length * 10;
+      const winChance = myPower / (myPower + enemyPower);
+
+      if (Math.random() < winChance) {
+        myGang.bank += bet;
+        enemyGang.bank = Math.max(0, enemyGang.bank - bet);
+        saveData(data);
+        return interaction.reply(`💥 **انتصار ساحق في معركة العصابات!** هزمت عصابتك **[ ${myGang.name} ]** عصابة **[ ${enemyGangName} ]** وربحت **${bet.toLocaleString()}** عملة لخزينتكم! 🔥`);
+      } else {
+        myGang.bank = Math.max(0, myGang.bank - bet);
+        enemyGang.bank += bet;
+        saveData(data);
+        return interaction.reply(`💥 **خسارة في الحرب!** هزمت عصابة **[ ${enemyGangName} ]** عصابتك وتم سلب **${bet.toLocaleString()}** عملة من الخزينة!`);
+      }
     }
 
     case 'حساب': {
@@ -404,6 +476,7 @@ client.on(Events.InteractionCreate, async interaction => {
         .setTitle(`📊 ملف المجرم: ${user.username}`)
         .addFields(
           { name: '💰 الرصيد النقدي', value: `${userData.balance.toLocaleString()} عملة`, inline: true },
+          { name: '🏦 الرصيد المبيض', value: `${userData.cleanBalance.toLocaleString()} عملة`, inline: true },
           { name: '⭐ المستوى', value: `مستوى **${userData.level}** (${userData.xp} XP)`, inline: true },
           { name: '🛡️ العصابة الحالية', value: userData.gang || 'بدون عصابة ❌', inline: true },
           { name: '🎒 الترسانة والمركبات', value: invText, inline: false }
@@ -413,12 +486,8 @@ client.on(Events.InteractionCreate, async interaction => {
 
     case 'سرقة': {
       const now = Date.now();
-      if ((userData.jailUntil || 0) > now) {
-        return interaction.reply({ content: `🚨 أنت مسجون! لا يمكنك القيام بالسطو حالياً.`, ephemeral: true });
-      }
-      if (userData.kidnappedBy) {
-        return interaction.reply({ content: `🚨 أنت مخطوف ومقيد! اطلب دفع الفدية للحرية.`, ephemeral: true });
-      }
+      if ((userData.jailUntil || 0) > now) return interaction.reply({ content: `🚨 أنت مسجون! لا يمكنك القيام بالسطو.`, ephemeral: true });
+      if (userData.kidnappedBy) return interaction.reply({ content: `🚨 أنت مخطوف ومقيد! اطلب دفع الفدية للحرية.`, ephemeral: true });
 
       let baseChance = 0.40 + (userData.level * 0.02);
       if (userData.inventory.pistol > 0) baseChance += 0.15;
@@ -429,7 +498,7 @@ client.on(Events.InteractionCreate, async interaction => {
         const loot = Math.floor(Math.random() * 800) + 200 + (userData.level * 50);
         userData.balance += loot;
         const lvlUp = addXp(userData, 40);
-        saveData(data);
+        saveData(data); // 🟢 حفظ فوري
 
         let msg = `🥷 **عملية سطو ناجحة!** حصلت على **${loot.toLocaleString()}** عملة و **40 XP**! 💰`;
         if (lvlUp) msg += `\n🎉 **مبروك! ارتفع مستواك إلى المستوى ${userData.level}!**`;
@@ -443,58 +512,9 @@ client.on(Events.InteractionCreate, async interaction => {
           userData.jailUntil = now + (10 * 60 * 1000);
           const fine = Math.min(userData.balance, 300);
           userData.balance -= fine;
-          saveData(data);
+          saveData(data); // 🟢 حفظ فوري
           return interaction.reply(`🚨 **قبضت عليك الشرطة!** تم تغريمك **${fine.toLocaleString()}** عملة وسجنك **10 دقائق**! 🚔`);
         }
-      }
-    }
-
-    case 'احتلال': {
-      const terrKey = options.getString('المنطقة');
-      const territory = data.territories[terrKey];
-
-      if (!userData.gang || !data.gangs[userData.gang]) {
-        return interaction.reply({ content: '❌ يجب أن تنتمي لعصابة لتستطيع السيطرة على المناطق!', ephemeral: true });
-      }
-
-      if (territory.owner === userData.gang) {
-        return interaction.reply({ content: `❌ عصابتك تتسيد وتسيطر بالفعل على **${territory.name}**!`, ephemeral: true });
-      }
-
-      // حساب قوة السيطرة بناءً على أسلحة اللاعب والمستوى
-      let captureChance = 0.40;
-      if (userData.inventory.smg > 0) captureChance += 0.30;
-      if (userData.inventory.car > 0) captureChance += 0.15;
-
-      if (Math.random() < captureChance) {
-        territory.owner = userData.gang;
-        data.gangs[userData.gang].bank += territory.tax;
-        saveData(data);
-        return interaction.reply(`⚔️ **اقتحام وسيطرة ناجحة!** سيطرت عصابة **[ ${userData.gang} ]** على **${territory.name}** وجنت **${territory.tax.toLocaleString()}** عملة لخزينتها! 🔥`);
-      } else {
-        return interaction.reply(`💥 **فشلت عملية السيطرة على ${territory.name}!** تصدت الحراسات والخصوم للهجوم!`);
-      }
-    }
-
-    case 'نرد': {
-      const bet = options.getInteger('المبلغ');
-      if (bet <= 0 || userData.balance < bet) {
-        return interaction.reply({ content: '❌ رصيدك النقدي لا يكفي لهذه المراهنة!', ephemeral: true });
-      }
-
-      const playerRoll = Math.floor(Math.random() * 6) + 1;
-      const botRoll = Math.floor(Math.random() * 6) + 1;
-
-      if (playerRoll > botRoll) {
-        userData.balance += bet;
-        saveData(data);
-        return interaction.reply(`🎲 **فوز ساحق!** رميت **${playerRoll}** مقابل **${botRoll}** للكازينو. كسبت **${bet.toLocaleString()}** عملة! 💰✨`);
-      } else if (playerRoll < botRoll) {
-        userData.balance -= bet;
-        saveData(data);
-        return interaction.reply(`🎲 **خسارة!** رميت **${playerRoll}** مقابل **${botRoll}** للكازينو. خسرت **${bet.toLocaleString()}** عملة.`);
-      } else {
-        return interaction.reply(`🎲 **تعادل!** رميتما **${playerRoll}**، تم استرداد مبلغ المراهنة.`);
       }
     }
 
@@ -507,7 +527,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
       initUser(data, targetUser.id);
       const targetData = data.users[targetUser.id];
-
       if (targetData.kidnappedBy) return interaction.reply({ content: '❌ هذا الشخص مخطوف بالفعل!', ephemeral: true });
 
       let kidnapChance = 0.35;
@@ -562,6 +581,50 @@ client.on(Events.InteractionCreate, async interaction => {
 
       saveData(data);
       return interaction.reply(`🎯 **عملية اغتيال ناجحة!** أصبت <@${targetUser.id}> وسلبت **${loot.toLocaleString()}** عملة منه! 💥`);
+    }
+
+    case 'احتلال': {
+      const terrKey = options.getString('المنطقة');
+      const territory = data.territories[terrKey];
+
+      if (!userData.gang || !data.gangs[userData.gang]) {
+        return interaction.reply({ content: '❌ يجب أن تنتمي لعصابة لتستطيع السيطرة على المناطق!', ephemeral: true });
+      }
+
+      let captureChance = 0.40;
+      if (userData.inventory.smg > 0) captureChance += 0.30;
+      if (userData.inventory.car > 0) captureChance += 0.15;
+
+      if (Math.random() < captureChance) {
+        territory.owner = userData.gang;
+        data.gangs[userData.gang].bank += territory.tax;
+        saveData(data);
+        return interaction.reply(`⚔️ **اقتحام وسيطرة ناجحة!** سيطرت عصابة **[ ${userData.gang} ]** على **${territory.name}** وجنت **${territory.tax.toLocaleString()}** عملة لخزينتها! 🔥`);
+      } else {
+        return interaction.reply(`💥 **فشلت عملية السيطرة على ${territory.name}!** تصدت الحراسات للهجوم!`);
+      }
+    }
+
+    case 'نرد': {
+      const bet = options.getInteger('المبلغ');
+      if (bet <= 0 || userData.balance < bet) {
+        return interaction.reply({ content: '❌ رصيدك النقدي لا يكفي لهذه المراهنة!', ephemeral: true });
+      }
+
+      const playerRoll = Math.floor(Math.random() * 6) + 1;
+      const botRoll = Math.floor(Math.random() * 6) + 1;
+
+      if (playerRoll > botRoll) {
+        userData.balance += bet;
+        saveData(data);
+        return interaction.reply(`🎲 **فوز ساحق!** رميت **${playerRoll}** مقابل **${botRoll}** للكازينو. كسبت **${bet.toLocaleString()}** عملة! 💰✨`);
+      } else if (playerRoll < botRoll) {
+        userData.balance -= bet;
+        saveData(data);
+        return interaction.reply(`🎲 **خسارة!** رميت **${playerRoll}** مقابل **${botRoll}** للكازينو. خسرت **${bet.toLocaleString()}** عملة.`);
+      } else {
+        return interaction.reply(`🎲 **تعادل!** رميتما **${playerRoll}**، تم استرداد المبلغ.`);
+      }
     }
 
     case 'كفالة': {
