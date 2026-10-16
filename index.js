@@ -52,6 +52,7 @@ const GameSchema = new mongoose.Schema({
   territories: { type: Object, default: { financial: null, industrial: null, port: null } },
   activeWars: { type: Object, default: {} },
   activeConvoys: { type: Object, default: {} },
+  hostages: { type: Object, default: {} },
   mayor: { type: Object, default: { id: null, taxRate: 15, treasury: 0 } },
   policeForce: { type: Array, default: [] },
   settings: { type: Object, default: {} }
@@ -75,6 +76,7 @@ async function readData() {
           bounties: {},
           activeWars: {},
           activeConvoys: {},
+          hostages: {},
           mayor: { id: null, taxRate: 15, treasury: 0 },
           policeForce: [],
           territories: { financial: null, industrial: null, port: null }
@@ -85,6 +87,7 @@ async function readData() {
       if (!dataObj.gangs) dataObj.gangs = {};
       if (!dataObj.bounties) dataObj.bounties = {};
       if (!dataObj.activeConvoys) dataObj.activeConvoys = {};
+      if (!dataObj.hostages) dataObj.hostages = {};
       if (!dataObj.territories) dataObj.territories = { financial: null, industrial: null, port: null };
       if (!dataObj.mayor) dataObj.mayor = { id: null, taxRate: 15, treasury: 0 };
       if (!dataObj.policeForce) dataObj.policeForce = [];
@@ -101,13 +104,14 @@ async function readData() {
       if (!parsed.gangs) parsed.gangs = {};
       if (!parsed.bounties) parsed.bounties = {};
       if (!parsed.activeConvoys) parsed.activeConvoys = {};
+      if (!parsed.hostages) parsed.hostages = {};
       if (!parsed.territories) parsed.territories = { financial: null, industrial: null, port: null };
       if (!parsed.mayor) parsed.mayor = { id: null, taxRate: 15, treasury: 0 };
       if (!parsed.policeForce) parsed.policeForce = [];
       return parsed;
     }
   } catch (err) {}
-  return { users: {}, gangs: {}, bounties: {}, activeWars: {}, activeConvoys: {}, mayor: { id: null, taxRate: 15, treasury: 0 }, policeForce: [], territories: { financial: null, industrial: null, port: null }, settings: {} };
+  return { users: {}, gangs: {}, bounties: {}, activeWars: {}, activeConvoys: {}, hostages: {}, mayor: { id: null, taxRate: 15, treasury: 0 }, policeForce: [], territories: { financial: null, industrial: null, port: null }, settings: {} };
 }
 
 async function saveData(data) {
@@ -123,6 +127,7 @@ async function saveData(data) {
             territories: data.territories,
             activeWars: data.activeWars,
             activeConvoys: data.activeConvoys,
+            hostages: data.hostages,
             mayor: data.mayor,
             policeForce: data.policeForce,
             settings: data.settings
@@ -153,7 +158,7 @@ const WEAPONS = {
 const JOBS = {
   driver: { name: '🏎️ السائق الخبير', desc: 'يزيد سرعة الهروب وفرار السرقات.' },
   hacker: { name: '💻 الهكر الإجرامي', desc: 'يخفض رسوم غسيل الأموال إلى 5%.' },
-  hitman: { name: '🪖 المسلح العنيف', desc: 'مكافأة مضاعفة في الاغتيالات والنزاعات.' },
+  hitman: { name: '🪖 المسلح العنيف', desc: 'مكافأة مضاعفة في الاغتيالات والنزاعات ونسبة نجاح أعلى.' },
   medic: { name: '🩺 طبيب السوق السوداء', desc: 'يساعد في تقليص مدة السجن.' },
   lawyer: { name: '⚖️ المحامي الفاسد', desc: 'يخفض الكفالة إلى 2,500 عملة بدلاً من 5,000.' },
   cop: { name: '👮 شرطي المدينة', desc: 'حفظ الأمن والقبض على المجرمين (ممنوع لأعضاء العصابات).' }
@@ -325,6 +330,80 @@ client.on(Events.InteractionCreate, async interaction => {
     initUser(data, userId);
     const userData = data.users[userId];
 
+    if (interaction.customId === 'modal_kidnap_target') {
+      if (!userData.gang || !data.gangs[userData.gang]) {
+        return interaction.reply({ content: '❌ يجب أن تنتمي لعصابة لتتمكن من خطف المنافسين!', ephemeral: true });
+      }
+      const targetUser = interaction.fields.getMentionable('kidnap_target_mention');
+      if (!targetUser) return interaction.reply({ content: '❌ يرجى منشن الهدف بشكل صحيح!', ephemeral: true });
+      const targetId = targetUser.id;
+      initUser(data, targetId);
+      const targetData = data.users[targetId];
+
+      if (!targetData.gang || targetData.gang === userData.gang) {
+        return interaction.reply({ content: '❌ لا يمكنك خطف شخص ليس لديه عصابة أو ينتمي لعصابتك!', ephemeral: true });
+      }
+
+      data.hostages[targetId] = { hostageId: targetId, kidnapperGang: userData.gang, victimGang: targetData.gang, ransom: 5000 };
+      targetData.jailUntil = Date.now() + (30 * 60 * 1000); // احتجاز 30 دقيقة
+      await saveData(data);
+
+      return interaction.reply({ content: `🕵️‍♂️🚨 **عملية اختطاف ناجحة!** قامت عصابة [ ${userData.gang} ] بخطف العضو <@${targetId}> من عصابة **[ ${targetData.gang} ]** واحتجازه كرهينة مقابل فدية قدرها **5,000 عملة**!` });
+    }
+
+    if (interaction.customId === 'modal_negotiate_ransom') {
+      const hostId = interaction.fields.getTextInputValue('negotiate_hostage_id').trim();
+      const customRansom = parseInt(interaction.fields.getTextInputValue('negotiate_ransom_amount'));
+      if (!data.hostages[hostId] || isNaN(customRansom) || customRansom <= 0) {
+        return interaction.reply({ content: '❌ معلومات الرهينة غير صحيحة أو مبلغ الفدية غير صالح!', ephemeral: true });
+      }
+      data.hostages[hostId].ransom = customRansom;
+      await saveData(data);
+      return interaction.reply({ content: `⚖️ **تم تعديل وتثبيت مبلغ الفدية للرهينة <@${hostId}> بنجاح لصبح:** **${customRansom.toLocaleString()} عملة**!` });
+    }
+
+    if (interaction.customId === 'modal_add_bounty') {
+      const targetUser = interaction.fields.getMentionable('bounty_target_mention');
+      const amount = parseInt(interaction.fields.getTextInputValue('bounty_amount_input'));
+      if (!targetUser || isNaN(amount) || amount <= 0 || userData.balance < amount) {
+        return interaction.reply({ content: '❌ بيانات غير صالحة أو رصيدك لا يكفي لرصد هذا العقد!', ephemeral: true });
+      }
+      userData.balance -= amount;
+      data.bounties[targetUser.id] = (data.bounties[targetUser.id] || 0) + amount;
+      await saveData(data);
+      return interaction.reply({ content: `🎯 **تم رصد وإضافة عقد اغتيال بقيمة ${amount.toLocaleString()} عملة** على رأس الهدف <@${targetUser.id}>!` });
+    }
+
+    if (interaction.customId === 'modal_execute_hit') {
+      const targetUser = interaction.fields.getMentionable('hit_target_mention');
+      if (!targetUser) return interaction.reply({ content: '❌ يرجى منشن الهدف بشكل صحيح!', ephemeral: true });
+      const targetId = targetUser.id;
+      initUser(data, targetId);
+
+      const bountyAmt = data.bounties[targetId] || 0;
+      if (bountyAmt <= 0) {
+        return interaction.reply({ content: `❌ العضو <@${targetId}> ليس لديه عقد اغتيال أو جائزة مالية على رأسه حالياً!`, ephemeral: true });
+      }
+
+      const isHitman = userData.job === 'hitman';
+      const hasWeapon = (userData.inventory.pistol || 0) > 0 || (userData.inventory.smg || 0) > 0;
+      const successChance = isHitman ? 0.80 : (hasWeapon ? 0.55 : 0.30);
+
+      if (Math.random() < successChance) {
+        const reward = isHitman ? Math.floor(bountyAmt * 1.2) : bountyAmt;
+        userData.balance += reward;
+        userData.kills = (userData.kills || 0) + 1;
+        data.users[targetId].jailUntil = Date.now() + (15 * 60 * 1000);
+        delete data.bounties[targetId];
+        await saveData(data);
+        return interaction.reply({ content: `🗡️🎯 **تمت عملية الاغتيال بنجاح!** قضيت على <@${targetId}> وإرساله للسجن 15 دقيقة، وحصلت على الجائزة **${reward.toLocaleString()} عملة**!` });
+      } else {
+        userData.jailUntil = Date.now() + (10 * 60 * 1000);
+        await saveData(data);
+        return interaction.reply({ content: '🚨💥 **فشلت عملية الاغتيال!** كشفت الشرطة أمرك وتم إلقاء القبض عليك وحبسك لـ 10 دقائق!', ephemeral: true });
+      }
+    }
+
     if (interaction.customId === 'modal_deposit_gang') {
       if (!userData.gang || !data.gangs[userData.gang]) {
         return interaction.reply({ content: '❌ أنت لست عضواً في عصابة لإيداع الأموال فيها!', ephemeral: true });
@@ -474,6 +553,99 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.reply({ components: [new ActionRowBuilder().addComponents(menu)], ephemeral: true });
     }
 
+    // === لوحة الاغتيالات والعقود المباشرة ===
+    if (interaction.customId === 'main_btn_wanted') {
+      let bountyText = '';
+      for (const [tId, amount] of Object.entries(data.bounties || {})) {
+        if (amount > 0) bountyText += `• المطلوب: <@${tId}> ➔ مكافأة اغتيال **${amount.toLocaleString()}** عملة 🎯\n`;
+      }
+      const embed = new EmbedBuilder().setColor('#e74c3c').setTitle('🎯 لوحة الاغتيالات والعقود الأمنية').setDescription(bountyText || 'لا توجد عقود اغتيال أو مطلوبين في المدينة حالياً! 🕊️');
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('btn_open_add_bounty').setLabel('➕ وضع عقد اغتيال').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('btn_open_execute_hit').setLabel('🗡️ تنفيذ اغتيال هدف').setStyle(ButtonStyle.Danger)
+      );
+      return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+    }
+
+    if (interaction.customId === 'btn_open_add_bounty') {
+      const modal = new ModalBuilder().setCustomId('modal_add_bounty').setTitle('➕ رصد عقد اغتيال جديد');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('bounty_target_mention').setLabel('منشن الهدف (مثال: @User):').setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('bounty_amount_input').setLabel('المكافأة المالية المرصودة:').setStyle(TextInputStyle.Short).setRequired(true))
+      );
+      return interaction.showModal(modal);
+    }
+
+    if (interaction.customId === 'btn_open_execute_hit') {
+      const modal = new ModalBuilder().setCustomId('modal_execute_hit').setTitle('🗡️ تنفيذ عقد اغتيال');
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('hit_target_mention').setLabel('منشن الهدف المطلوب (مثال: @User):').setStyle(TextInputStyle.Short).setRequired(true)));
+      return interaction.showModal(modal);
+    }
+
+    // === نظام الاختطاف والفدية ===
+    if (interaction.customId === 'main_btn_gang_wars') {
+      let hostageList = '';
+      for (const [hId, hData] of Object.entries(data.hostages || {})) {
+        hostageList += `• الرهينة: <@${hId}> | الخاطف: **[ ${hData.kidnapperGang} ]** | الفدية: **${(hData.ransom || 5000).toLocaleString()} عملة** 🕵️‍♂️\n`;
+      }
+      const embed = new EmbedBuilder().setColor('#e67e22').setTitle('🚚 شاحنات التهريب واختطاف الرهائن').setDescription(hostageList || 'لا توجد رهائن محتجزة حالياً في المدينة! 🕊️');
+      const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('btn_open_send_convoy').setLabel('🚚 إرسال شاحنة تهريب (x2)').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('btn_open_kidnap').setLabel('🕵️‍♂️ اختطاف عضو منافس').setStyle(ButtonStyle.Danger)
+      );
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('btn_pay_ransom').setLabel('💰 دفع الفدية واسترجاع الرهينة').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('btn_open_negotiate').setLabel('⚖️ تفاوض على الفدية').setStyle(ButtonStyle.Secondary)
+      );
+      return interaction.reply({ embeds: [embed], components: [row1, row2], ephemeral: true });
+    }
+
+    if (interaction.customId === 'btn_open_kidnap') {
+      if (!userData.gang) return interaction.reply({ content: '❌ يجب أن تنتمي لعصابة لتنفذ عملية اختطاف!', ephemeral: true });
+      const modal = new ModalBuilder().setCustomId('modal_kidnap_target').setTitle('🕵️‍♂️ اختطاف عضو عصابة منافسة');
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('kidnap_target_mention').setLabel('منشن العضو المراد خطفه:').setStyle(TextInputStyle.Short).setRequired(true)));
+      return interaction.showModal(modal);
+    }
+
+    if (interaction.customId === 'btn_pay_ransom') {
+      if (!userData.gang || !data.gangs[userData.gang]) return interaction.reply({ content: '❌ يجب أن تنتمي لعصابة لدفع الفدية!', ephemeral: true });
+      const gang = data.gangs[userData.gang];
+      let foundHostageId = null;
+      let hostageInfo = null;
+
+      for (const [hId, hData] of Object.entries(data.hostages || {})) {
+        if (hData.victimGang === userData.gang) {
+          foundHostageId = hId;
+          hostageInfo = hData;
+          break;
+        }
+      }
+
+      if (!foundHostageId) return interaction.reply({ content: '❌ لا توجد أي رهائن محتجزة تنتمي لعصابتك حالياً!', ephemeral: true });
+      const cost = hostageInfo.ransom || 5000;
+
+      if ((gang.bank || 0) < cost) {
+        return interaction.reply({ content: `❌ رصيد خزينة عصابتك لا يكفي لدفع الفدية المطلوبة (${cost.toLocaleString()} عملة)!`, ephemeral: true });
+      }
+
+      gang.bank -= cost;
+      data.users[foundHostageId].jailUntil = 0;
+      data.gangs[hostageInfo.kidnapperGang].bank = (data.gangs[hostageInfo.kidnapperGang].bank || 0) + cost;
+      delete data.hostages[foundHostageId];
+      await saveData(data);
+
+      return interaction.reply({ content: `💰🤝 **تم دفع الفدية بنجاح!** استقطعت عصابتك **${cost.toLocaleString()} عملة** من الخزينة، وتم تحرير العضو <@${foundHostageId}> وإطلاق سراحه!` });
+    }
+
+    if (interaction.customId === 'btn_open_negotiate') {
+      const modal = new ModalBuilder().setCustomId('modal_negotiate_ransom').setTitle('⚖️ تفاوض وتعديل مبلغ الفدية');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('negotiate_hostage_id').setLabel('Discord ID للرهينة:').setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('negotiate_ransom_amount').setLabel('مبلغ الفدية الجديد المقترح:').setStyle(TextInputStyle.Short).setRequired(true))
+      );
+      return interaction.showModal(modal);
+    }
+
     // === السجن المركزي وكسر السجن ===
     if (interaction.customId === 'main_btn_jail') {
       let jailList = '';
@@ -612,50 +784,6 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.showModal(modal);
     }
 
-    // === شاحنات التهريب والأحياء ===
-    if (interaction.customId === 'main_btn_gang_wars') {
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('btn_open_send_convoy').setLabel('🚚 إرسال شاحنة تهريب (x2)').setStyle(ButtonStyle.Success)
-      );
-      return interaction.reply({ content: '🚚 **إدارة شاحنات التهريب وحروب العصابات:**', components: [row], ephemeral: true });
-    }
-
-    if (interaction.customId === 'btn_open_send_convoy') {
-      if (!userData.gang || !data.gangs[userData.gang]) {
-        return interaction.reply({ content: '❌ يجب أن تنتمي لعصابة لإرسال شاحنة تهريب!', ephemeral: true });
-      }
-      const modal = new ModalBuilder().setCustomId('modal_send_convoy').setTitle('🚚 إرسال شاحنة تهريب');
-      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('convoy_amount_input').setLabel('المبلغ المراد إرساله (الحد الأدنى 2,000):').setStyle(TextInputStyle.Short).setRequired(true)));
-      return interaction.showModal(modal);
-    }
-
-    if (interaction.customId.startsWith('btn_ambush_convoy_')) {
-      const convoyId = interaction.customId.replace('btn_ambush_convoy_', '');
-      const convoy = data.activeConvoys[convoyId];
-      if (!convoy || convoy.status !== 'in_transit') {
-        return interaction.reply({ content: '❌ هذه الشاحنة وصلت بسلام أو تم السطو عليها مسبقاً!', ephemeral: true });
-      }
-      if (!userData.gang || userData.gang === convoy.gang) {
-        return interaction.reply({ content: '❌ لا يمكنك مهاجمة شاحنة عصابتك أو بدون عصابة!', ephemeral: true });
-      }
-
-      const loot = convoy.amount;
-      data.gangs[userData.gang].bank = (data.gangs[userData.gang].bank || 0) + loot;
-      delete data.activeConvoys[convoyId];
-      await saveData(data);
-      return interaction.reply({ content: `💥🚚 **كمين ناجح!** استولت عصابتك [ ${userData.gang} ] على حمولة الشاحنة (**${loot.toLocaleString()} عملة**) وإيداعها بخزينة العصابة!` });
-    }
-
-    // === المطلوبين والعقود ===
-    if (interaction.customId === 'main_btn_wanted') {
-      let bountyText = '';
-      for (const [tId, amount] of Object.entries(data.bounties || {})) {
-        if (amount > 0) bountyText += `• المطلوب: <@${tId}> ➔ مكافأة اغتيال **${amount.toLocaleString()}** عملة 🎯\n`;
-      }
-      const embed = new EmbedBuilder().setColor('#e74c3c').setTitle('🎯 لوحة العقود والمطلوبين أمنياً').setDescription(bountyText || 'لا توجد عقود اغتيال أو مطلوبين في المدينة حالياً! 🕊️');
-      return interaction.reply({ embeds: [embed], ephemeral: true });
-    }
-
     // === الشرطة ===
     if (interaction.customId === 'main_btn_police') {
       const isCop = userData.job === 'cop' || data.policeForce.includes(userId);
@@ -740,7 +868,7 @@ client.on(Events.InteractionCreate, async interaction => {
       const menu = new StringSelectMenuBuilder().setCustomId('select_job_menu').setPlaceholder('🎭 اختر مهنتك الإجرامية...').addOptions([
         { label: '🏎️ السائق الخبير', value: 'driver', description: 'يزيد سرعة الفرار.' },
         { label: '💻 الهكر الإجرامي', value: 'hacker', description: 'رسوم غسيل 5%.' },
-        { label: '🪖 المسلح العنيف', value: 'hitman', description: 'قوة اغتيالات.' },
+        { label: '🪖 المسلح العنيف', value: 'hitman', description: 'قوة اغتيالات ونسبة نجاح أعلى.' },
         { label: '🩺 طبيب السوق السوداء', value: 'medic', description: 'إسعاف وتقليص السجن.' },
         { label: '⚖️ المحامي الفاسد', value: 'lawyer', description: 'كفالة مخفضة 2,500.' },
         { label: '👮 شرطي المدينة', value: 'cop', description: 'حفظ الأمن (ممنوع لأعضاء العصابات).' }
@@ -793,7 +921,7 @@ client.on(Events.InteractionCreate, async interaction => {
         new ButtonBuilder().setCustomId('main_btn_police').setLabel('🚓 الشرطة').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('main_btn_jobs').setLabel('🎭 المهن').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('main_btn_territories').setLabel('🏢 الأحياء').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('main_btn_wanted').setLabel('🎯 المطلوبين').setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId('main_btn_wanted').setLabel('🎯 الاغتيالات').setStyle(ButtonStyle.Danger)
       );
 
       return interaction.editReply({ embeds: [embed], components: [row1, row2, row3] });
@@ -841,7 +969,7 @@ client.on(Events.InteractionCreate, async interaction => {
       for (const [tId, amount] of Object.entries(data.bounties || {})) {
         if (amount > 0) bountyText += `• المطلوب: <@${tId}> ➔ مكافأة اغتيال **${amount.toLocaleString()}** عملة 🎯\n`;
       }
-      const embed = new EmbedBuilder().setColor('#e74c3c').setTitle('🎯 قائمة المطلوبين أمنياً').setDescription(bountyText || 'لا يوجد مطلوبين حالياً في المدينة! 🕊️');
+      const embed = new EmbedBuilder().setColor('#e74c3c').setTitle('🎯 قائمة الاغتيالات والمطلوبين أمنياً').setDescription(bountyText || 'لا توجد عقود اغتيال أو مطلوبين في المدينة حالياً! 🕊️');
       return interaction.editReply({ embeds: [embed] });
     }
 
