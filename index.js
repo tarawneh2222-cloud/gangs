@@ -165,13 +165,13 @@ const client = new Client({
 
 client.commands = new Collection();
 
-// === 5. تسجيل الأوامر البرمجية ===
+// === 5. تسجيل الأوامر البرمجية الكاملة ===
 const commands = [
   new SlashCommandBuilder().setName('قائمة').setDescription('عرض لوحة التحكم الرئيسية واللوحات التفاعلية بالأزرار الشاملة'),
   new SlashCommandBuilder().setName('انضمام').setDescription('إنشاء وتفعيل حساب جديد'),
-  new SlashCommandBuilder().setName('حساب').setDescription('عرض بيانات حسابك ومستواك وترسانتك'),
+  new SlashCommandBuilder().setName('حساب').setDescription('عرض بيانات حسابك ومستواك وترسانتك وألقابك'),
   new SlashCommandBuilder().setName('يومي').setDescription('الحصول على المكافأة اليومية'),
-  new SlashCommandBuilder().setName('صندوق_يومي').setDescription('فتح صندوق الهدايا والغنيمة اليومية العشوائية'),
+  new SlashCommandBuilder().setName('صندوق_يومي').setDescription('فتح صندوق الهدايا اليومي (مكافآت نقدية 100-1000)'),
   new SlashCommandBuilder().setName('سوق_سوداء').setDescription('شراء الأسلحة والسيارات والدروع'),
   new SlashCommandBuilder()
     .setName('شراء')
@@ -203,7 +203,7 @@ const commands = [
     .setDescription('وضع مكافأة مالية على رأس شخص لاغتياله (الحد الأدنى 5000 عملة)')
     .addUserOption(opt => opt.setName('الهدف').setDescription('الشخص المطلوب اغتياله').setRequired(true))
     .addIntegerOption(opt => opt.setName('المكافأة').setDescription('المبلغ المرصود').setRequired(true)),
-  new SlashCommandBuilder().setName('المطلوبين').setDescription('عرض لائحة الأشخاص المطلوب اغتيالهم والمكافآت'),
+  new SlashCommandBuilder().setName('المطلوبين').setDescription('عرض لائحة الأشخاص المطلوب اغتيالهم ومجرمي عدو الشعب'),
   new SlashCommandBuilder().setName('عمل_شاق').setDescription('كسر الأحجار لتقليص مدة عقوبة السجن'),
   new SlashCommandBuilder().setName('تهريب').setDescription('تنفيذ عملية هجوم مسلح لتحرير أعضاء عصابتك من السجن'),
   // أوامر المهن التفاعلية
@@ -286,7 +286,7 @@ client.once(Events.ClientReady, async () => {
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   try {
     await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-    console.log('✅ تم تسجيل كافة الأوامر والفعاليات والأزرار الشاملة بنجاح!');
+    console.log('✅ تم تسجيل كافة الأوامر والأنظمة الجديدة بنجاح!');
   } catch (error) {
     console.error('❌ خطأ في تحميل الأوامر:', error);
   }
@@ -300,6 +300,8 @@ function initUser(data, userId) {
       cleanBalance: 0,
       xp: 0,
       level: 1,
+      kills: 0,
+      escapes: 0,
       createdAt: new Date().toISOString(),
       dailyLast: null,
       boxLast: 0,
@@ -317,10 +319,22 @@ function initUser(data, userId) {
   if (u.cleanBalance === undefined) u.cleanBalance = 0;
   if (u.xp === undefined) u.xp = 0;
   if (u.level === undefined) u.level = 1;
+  if (u.kills === undefined) u.kills = 0;
+  if (u.escapes === undefined) u.escapes = 0;
   if (!u.inventory) u.inventory = { knife: 0, pistol: 0, smg: 0, armor: 0, car: 0 };
   if (!u.upgrades) u.upgrades = { silencer: false, thermal: false };
   if (u.boxLast === undefined) u.boxLast = 0;
   if (u.lastInvest === undefined) u.lastInvest = 0;
+}
+
+// === حساب اللقب التلقائي للاعب ===
+function getUserTitle(userData, totalWealth, bountyAmount) {
+  if (bountyAmount >= 20000) return '🚨 عدو الشعب رقم 1 (Most Wanted)';
+  if (totalWealth >= 500000) return '👑 العراب (Godfather)';
+  if (userData.kills >= 10) return '🗡️ سفاح المدينة';
+  if (userData.escapes >= 5) return '🔓 ملك الهروب السري';
+  if (userData.upgrades && userData.upgrades.thermal && userData.upgrades.silencer) return '🏎️ الشبح الخفي';
+  return '📌 مجرم مبتدئ';
 }
 
 function addXp(userData, amount) {
@@ -405,11 +419,15 @@ client.on(Events.InteractionCreate, async interaction => {
       if (!invText) invText = 'لا توجد أسلحة أو سيارات';
       const statusText = userData.kidnappedBy ? `⚠️ مخطوف من قبل <@${userData.kidnappedBy}>` : 'طليق وحر 🕊️';
       const jobText = userData.job ? JOBS[userData.job].name : 'بدون مهنة ❌';
+      const totalWealth = (userData.balance || 0) + (userData.cleanBalance || 0);
+      const userBounty = data.bounties[userId] || 0;
+      const title = getUserTitle(userData, totalWealth, userBounty);
 
       const embed = new EmbedBuilder()
         .setColor('#2ECC71')
         .setTitle(`📊 ملف المجرم: ${interaction.user.username}`)
         .addFields(
+          { name: '🎖️ اللقب الشرفي', value: title, inline: false },
           { name: '💰 الرصيد النقدي', value: `${(userData.balance || 0).toLocaleString()} عملة`, inline: true },
           { name: '🏦 الرصيد المبيض', value: `${(userData.cleanBalance || 0).toLocaleString()} عملة`, inline: true },
           { name: '⭐ المستوى', value: `مستوى **${userData.level || 1}** (${userData.xp || 0} XP)`, inline: true },
@@ -542,7 +560,7 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.editReply({ content: '✅ تم تفعيل حسابك وحفظ بياناتك سحابياً بنجاح!' });
     }
 
-    // --- الصندوق اليومي (فكرة 3) ---
+    // --- الصندوق اليومي (مكافآت نقدية 100 إلى 1000) ---
     case 'صندوق_يومي': {
       const now = Date.now();
       if (now - (userData.boxLast || 0) < 24 * 60 * 60 * 1000) {
@@ -550,25 +568,14 @@ client.on(Events.InteractionCreate, async interaction => {
       }
 
       userData.boxLast = now;
-      const prizes = [
-        { type: 'money', val: 3000, text: '3,000 عملة نقدية 💰' },
-        { type: 'item', key: 'smg', text: 'رشاش قصير 🪖' },
-        { type: 'item', key: 'armor', text: 'درع واقي 🛡️' },
-        { type: 'item', key: 'car', text: 'سيارة هرب سريعة 🏎️' }
-      ];
-      const won = prizes[Math.floor(Math.random() * prizes.length)];
-
-      if (won.type === 'money') {
-        userData.balance += won.val;
-      } else {
-        userData.inventory[won.key] = (userData.inventory[won.key] || 0) + 1;
-      }
+      const prizeMoney = Math.floor(Math.random() * 901) + 100; // بين 100 و 1000
+      userData.balance += prizeMoney;
       await saveData(data);
 
-      return interaction.editReply(`🎁 **فتحت الصندوق اليومي بنجاح!**\nحصلت على جائزة مميزة: **${won.text}** 🎉`);
+      return interaction.editReply(`🎁 **فتحت الصندوق اليومي بنجاح!**\nحصلت على جائزة نقدية فورية بقيمة: **${prizeMoney.toLocaleString()} عملة** 💰✨`);
     }
 
-    // --- ترقية الأسلحة (فكرة 4) ---
+    // --- ترقية الأسلحة ---
     case 'ترقية': {
       const upKey = options.getString('ترقية');
       const up = UPGRADES[upKey];
@@ -583,7 +590,7 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.editReply(`🛠️ **تمت الترقية بنجاح!** حصلت على **${up.name}** وتم تفعيل ميزتها التكتيكية. 🔥`);
     }
 
-    // --- الهروب الكبير من السجن (فكرة 2) ---
+    // --- الهروب الكبير من السجن ---
     case 'تهريب': {
       const now = Date.now();
       if (!userData.gang || !data.gangs[userData.gang]) {
@@ -608,6 +615,7 @@ client.on(Events.InteractionCreate, async interaction => {
         gangJailedMembers.forEach(id => {
           data.users[id].jailUntil = 0;
         });
+        userData.escapes += 1;
         await saveData(data);
         return interaction.editReply(`🥷💥 **عملية تهريب بطولية ناجحة!** هاجمت العصابة السجن برشاشات ثقيلة وحررت جميع الأعضاء المسجونين دفعة واحدة! 🔥`);
       } else {
@@ -776,17 +784,23 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.editReply(`🎯 **تم رصد عقد اغتيال بنجاح!**\nتم رصد مبلغ **${reward.toLocaleString()}** عملة على رأس <@${targetUser.id}>! أصبح مجموع المكافأة: **${data.bounties[targetUser.id].toLocaleString()} عملة** 🔥`);
     }
 
+    // --- قائمة المطلوبين وعدو الشعب ---
     case 'المطلوبين': {
       let bountyText = '';
+      let mostWantedText = '';
       for (const [targetId, amount] of Object.entries(data.bounties || {})) {
         if (amount > 0) {
-          bountyText += `• المطلوب: <@${targetId}> ➔ المكافأة المرصودة: **${amount.toLocaleString()}** عملة 🔥\n`;
+          if (amount >= 20000) {
+            mostWantedText += `🚨 **عدو الشعب رقم 1:** <@${targetId}> — المكافأة: **${amount.toLocaleString()}** عملة 🔥\n`;
+          } else {
+            bountyText += `• المطلوب: <@${targetId}> ➔ المكافأة: **${amount.toLocaleString()}** عملة 🎯\n`;
+          }
         }
       }
       const embed = new EmbedBuilder()
         .setColor('#e74c3c')
-        .setTitle('🎯 قائمة المطلوب اغتيالهم (Bounty Board)')
-        .setDescription(bountyText || 'لا يوجد أي عقود اغتيال مرصودة حالياً!');
+        .setTitle('🎯 لوحة المطلوبين ومجرمي عدو الشعب')
+        .setDescription((mostWantedText ? mostWantedText + '\n' : '') + (bountyText || 'لا يوجد عقود اغتيال عادية حالياً!'));
       return interaction.editReply({ embeds: [embed] });
     }
 
@@ -821,6 +835,7 @@ client.on(Events.InteractionCreate, async interaction => {
       targetData.balance -= loot;
       userData.balance += loot;
       targetData.jailUntil = Date.now() + (15 * 60 * 1000);
+      userData.kills += 1; // زيادة عدد القتلى للإنجازات
 
       let bountyBonus = 0;
       if (data.bounties[targetUser.id] && data.bounties[targetUser.id] > 0) {
@@ -1094,11 +1109,15 @@ client.on(Events.InteractionCreate, async interaction => {
       }
       if (!invText) invText = 'لا توجد أسلحة أو سيارات';
       const jobText = userData.job ? JOBS[userData.job].name : 'بدون مهنة ❌';
+      const totalWealth = userData.balance + userData.cleanBalance;
+      const userBounty = data.bounties[user.id] || 0;
+      const title = getUserTitle(userData, totalWealth, userBounty);
 
       const embed = new EmbedBuilder()
         .setColor('#2ECC71')
         .setTitle(`📊 ملف المجرم: ${user.username}`)
         .addFields(
+          { name: '🎖️ اللقب الشرفي', value: title, inline: false },
           { name: '💰 الرصيد النقدي', value: `${userData.balance.toLocaleString()} عملة`, inline: true },
           { name: '🏦 الرصيد المبيض', value: `${userData.cleanBalance.toLocaleString()} عملة`, inline: true },
           { name: '⭐ المستوى', value: `مستوى **${userData.level}** (${userData.xp} XP)`, inline: true },
@@ -1118,6 +1137,12 @@ client.on(Events.InteractionCreate, async interaction => {
       if (userData.inventory.smg > 0) baseChance += 0.25;
       if (userData.inventory.car > 0) baseChance += 0.10;
       if (userData.upgrades.silencer) baseChance += 0.10;
+
+      // إذا كان عدو الشعب رقم 1، تزيد نسبة القبض عليه بـ 50%
+      const userBounty = data.bounties[user.id] || 0;
+      if (userBounty >= 20000) {
+        baseChance -= 0.30;
+      }
 
       if (Math.random() < baseChance) {
         const loot = Math.floor(Math.random() * 800) + 200 + (userData.level * 50);
