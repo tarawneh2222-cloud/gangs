@@ -84,6 +84,7 @@ async function readData() {
       if (!dataObj.users) dataObj.users = {};
       if (!dataObj.gangs) dataObj.gangs = {};
       if (!dataObj.bounties) dataObj.bounties = {};
+      if (!dataObj.activeConvoys) dataObj.activeConvoys = {};
       if (!dataObj.mayor) dataObj.mayor = { id: null, taxRate: 15, treasury: 0 };
       if (!dataObj.policeForce) dataObj.policeForce = [];
       return dataObj;
@@ -98,6 +99,7 @@ async function readData() {
       if (!parsed.users) parsed.users = {};
       if (!parsed.gangs) parsed.gangs = {};
       if (!parsed.bounties) parsed.bounties = {};
+      if (!parsed.activeConvoys) parsed.activeConvoys = {};
       if (!parsed.mayor) parsed.mayor = { id: null, taxRate: 15, treasury: 0 };
       if (!parsed.policeForce) parsed.policeForce = [];
       return parsed;
@@ -173,12 +175,13 @@ const commands = [
   new SlashCommandBuilder().setName('يومي').setDescription('الحصول على المكافأة اليومية'),
   new SlashCommandBuilder().setName('صندوق_يومي').setDescription('فتح صندوق الهدايا اليومي'),
   new SlashCommandBuilder().setName('سوق_سوداء').setDescription('شراء الأسلحة والسيارات والدروع'),
-  new SlashCommandBuilder().setName('سرقة').setDescription('تنفيذ عملية سطو مسلح (بتهدئة 30 ثانية)'),
+  new SlashCommandBuilder().setName('سرقة').setDescription('تنفيذ عملية سطو مسلح (بتهدئة 30 دقيقة)'),
   new SlashCommandBuilder().setName('المطلوبين').setDescription('عرض قائمة الأشخاص المطلوب اغتيالهم وأصحاب المكافآت'),
   new SlashCommandBuilder().setName('السجن').setDescription('عرض قائمة المحتجزين بالسجن حالياً والوقت المتبقي'),
   new SlashCommandBuilder().setName('كفالة').setDescription('دفع كفالة الخروج من السجن'),
   new SlashCommandBuilder().setName('عصابتي').setDescription('عرض تفاصيل وإدارة عصابتك'),
   new SlashCommandBuilder().setName('إنشاء_عصابة').setDescription('تأسيس عصابة جديدة (5000 عملة)').addStringOption(opt => opt.setName('الاسم').setDescription('اسم العصابة').setRequired(true)),
+  new SlashCommandBuilder().setName('هجوم_عصابة').setDescription('مهاجمة خزينة عصابة منافسة أخرى').addStringOption(opt => opt.setName('اسم_العصابة').setDescription('اسم العصابة المستهدفة').setRequired(true)),
   new SlashCommandBuilder().setName('لوحة_الصدارة').setDescription('عرض قائمة أثرياء المدينة'),
   new SlashCommandBuilder()
     .setName('تعويض')
@@ -215,6 +218,7 @@ function initUser(data, userId) {
       boxLast: null,
       lastRob: 0,
       lastCasino: 0,
+      lastGangAttack: 0,
       lastPoliceArrest: 0,
       inventory: { knife: 0, pistol: 0, smg: 0, armor: 0, car: 0 },
       upgrades: { silencer: false, thermal: false },
@@ -230,17 +234,18 @@ function initUser(data, userId) {
   if (u.gang === undefined) u.gang = null;
   if (u.lastRob === undefined) u.lastRob = 0;
   if (u.lastCasino === undefined) u.lastCasino = 0;
+  if (u.lastGangAttack === undefined) u.lastGangAttack = 0;
   if (u.jailUntil === undefined) u.jailUntil = 0;
   if (!u.inventory) u.inventory = { knife: 0, pistol: 0, smg: 0, armor: 0, car: 0 };
 }
 
-// === معالجة السرقة مع وقت تهدئة 30 ثانية ===
+// === نظام التهدئة 30 دقيقة للسرقة ===
 async function handleRobbery(userData) {
   const now = Date.now();
-  const cooldown = 30 * 1000;
+  const cooldown = 30 * 60 * 1000; // 30 دقيقة
   if (now - (userData.lastRob || 0) < cooldown) {
-    const remaining = Math.ceil((cooldown - (now - userData.lastRob)) / 1000);
-    return `⏱️ **يجب عليك الانتظار ${remaining} ثانية** قبل إتمام عملية سرقة أخرى!`;
+    const remainingMins = Math.ceil((cooldown - (now - userData.lastRob)) / 60000);
+    return `⏱️ **يجب عليك الانتظار ${remainingMins} دقيقة** قبل إتمام عملية سرقة أخرى!`;
   }
   userData.lastRob = now;
   const loot = Math.floor(Math.random() * 800) + 200;
@@ -248,13 +253,13 @@ async function handleRobbery(userData) {
   return `🥷 **عملية سطو ناجحة!** سرقت **${loot.toLocaleString()} عملة**.`;
 }
 
-// === معالجة الكازينو مع وقت تهدئة 20 ثانية ===
+// === نظام التهدئة 30 دقيقة للكازينو ===
 async function handleCasino(userData) {
   const now = Date.now();
-  const cooldown = 20 * 1000;
+  const cooldown = 30 * 60 * 1000; // 30 دقيقة
   if (now - (userData.lastCasino || 0) < cooldown) {
-    const remaining = Math.ceil((cooldown - (now - userData.lastCasino)) / 1000);
-    return `⏱️ **أنت متسرع يا مجرم!** انتظر ${remaining} ثانية قبل تجربة الحظ مرة أخرى في الكازينو.`;
+    const remainingMins = Math.ceil((cooldown - (now - userData.lastCasino)) / 60000);
+    return `⏱️ **أنت متسرع يا مجرم!** انتظر ${remainingMins} دقيقة قبل تجربة حظك مرة أخرى في الكازينو.`;
   }
   userData.lastCasino = now;
   const win = Math.random() < 0.5;
@@ -329,6 +334,32 @@ client.on(Events.InteractionCreate, async interaction => {
       userData.balance += 1500;
       await saveData(data);
       return interaction.reply({ content: `🚓🚨 **تم القبض على المجرم <@${targetId}> وسجنه 15 دقيقة بنجاح!** وكسبت راتب دورية 1,500 عملة.` });
+    }
+
+    if (interaction.customId === 'modal_send_convoy') {
+      if (!userData.gang || !data.gangs[userData.gang]) {
+        return interaction.reply({ content: '❌ يجب أن تنتمي لعصابة لإرسال شاحنة تهريب!', ephemeral: true });
+      }
+      const amount = parseInt(interaction.fields.getTextInputValue('convoy_amount_input'));
+      const gang = data.gangs[userData.gang];
+      if (isNaN(amount) || amount < 2000 || (gang.bank || 0) < amount) {
+        return interaction.reply({ content: '❌ مبلغ غير صالح أو رصيد خزينة عصابتك لا يكفي (الحد الأدنى 2,000 عملة)!', ephemeral: true });
+      }
+      gang.bank -= amount;
+      const convoyId = `convoy_${Date.now()}`;
+      data.activeConvoys[convoyId] = { id: convoyId, gang: userData.gang, amount: amount, status: 'in_transit' };
+      await saveData(data);
+
+      const embed = new EmbedBuilder()
+        .setColor('#f39c12')
+        .setTitle('🚚 انطلاق شاحنة تهريب جديدة بالطريق السريع!')
+        .setDescription(`أرسلت عصابة **[ ${userData.gang} ]** شاحنة محملة بـ **${amount.toLocaleString()}** عملة!\n💰 **المكافأة المتوقعة عند الوصول بسلام:** **${(amount * 2).toLocaleString()} عملة** (ضعف المبلغ)!`);
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`btn_ambush_convoy_${convoyId}`).setLabel('💥 إعداد كمين والسطو على الشاحنة').setStyle(ButtonStyle.Danger)
+      );
+
+      return interaction.reply({ embeds: [embed], components: [row] });
     }
     return;
   }
@@ -430,6 +461,40 @@ client.on(Events.InteractionCreate, async interaction => {
       const res = await handleCasino(userData);
       await saveData(data);
       return interaction.reply({ content: res, ephemeral: true });
+    }
+
+    // === شاحنات التهريب والأحياء ===
+    if (interaction.customId === 'main_btn_gang_wars') {
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('btn_open_send_convoy').setLabel('🚚 إرسال شاحنة تهريب (x2)').setStyle(ButtonStyle.Success)
+      );
+      return interaction.reply({ content: '🚚 **إدارة شاحنات التهريب وحروب العصابات:**', components: [row], ephemeral: true });
+    }
+
+    if (interaction.customId === 'btn_open_send_convoy') {
+      if (!userData.gang || !data.gangs[userData.gang]) {
+        return interaction.reply({ content: '❌ يجب أن تنتمي لعصابة لإرسال شاحنة تهريب!', ephemeral: true });
+      }
+      const modal = new ModalBuilder().setCustomId('modal_send_convoy').setTitle('🚚 إرسال شاحنة تهريب');
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('convoy_amount_input').setLabel('المبلغ المراد إرساله (الحد الأدنى 2,000):').setStyle(TextInputStyle.Short).setRequired(true)));
+      return interaction.showModal(modal);
+    }
+
+    if (interaction.customId.startsWith('btn_ambush_convoy_')) {
+      const convoyId = interaction.customId.replace('btn_ambush_convoy_', '');
+      const convoy = data.activeConvoys[convoyId];
+      if (!convoy || convoy.status !== 'in_transit') {
+        return interaction.reply({ content: '❌ هذه الشاحنة وصلت بسلام أو تم السطو عليها مسبقاً!', ephemeral: true });
+      }
+      if (!userData.gang || userData.gang === convoy.gang) {
+        return interaction.reply({ content: '❌ لا يمكنك مهاجمة شاحنة عصابتك أو بدون عصابة!', ephemeral: true });
+      }
+
+      const loot = convoy.amount;
+      data.gangs[userData.gang].bank = (data.gangs[userData.gang].bank || 0) + loot;
+      delete data.activeConvoys[convoyId];
+      await saveData(data);
+      return interaction.reply({ content: `💥🚚 **كمين ناجح!** استولت عصابتك [ ${userData.gang} ] على حمولة الشاحنة (**${loot.toLocaleString()} عملة**) وإيداعها بخزينة العصابة!` });
     }
 
     // === المطلوبين ===
@@ -538,9 +603,6 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
-    if (interaction.customId === 'main_btn_gang_wars') {
-      return interaction.reply({ content: '🚚 لوحة شاحنات التهريب نشطة.', ephemeral: true });
-    }
     if (interaction.customId === 'main_btn_leaderboard') {
       return interaction.reply({ content: '🏆 الصدارة نشطة.', ephemeral: true });
     }
@@ -664,6 +726,40 @@ client.on(Events.InteractionCreate, async interaction => {
       data.gangs[gangName] = { name: gangName, leader: user.id, bank: 0, members: [user.id] };
       await saveData(data);
       return interaction.editReply({ content: `🎉 **تم تأسيس عصابة [ ${gangName} ] بنجاح!**` });
+    }
+
+    case 'هجوم_عصابة': {
+      if (!userData.gang || !data.gangs[userData.gang]) {
+        return interaction.editReply({ content: '❌ يجب أن تنتمي لعصابة لتستطيع مهاجمة العصابات الأخرى!' });
+      }
+      const targetGangName = options.getString('اسم_العصابة');
+      if (targetGangName === userData.gang) {
+        return interaction.editReply({ content: '❌ لا يمكنك مهاجمة عصابتك!' });
+      }
+      if (!data.gangs[targetGangName]) {
+        return interaction.editReply({ content: `❌ العصابة المستهدفة "${targetGangName}" غير موجودة أو وهمية!` });
+      }
+
+      const cooldown = 30 * 60 * 1000; // 30 دقيقة تهدئة للهجوم
+      if (now - (userData.lastGangAttack || 0) < cooldown) {
+        const remMins = Math.ceil((cooldown - (now - userData.lastGangAttack)) / 60000);
+        return interaction.editReply({ content: `⏱️ يجب الانتظار ${remMins} دقيقة قبل شن هجوم عصابة آخر!` });
+      }
+
+      userData.lastGangAttack = now;
+      const targetGang = data.gangs[targetGangName];
+      const targetBank = targetgang.bank || 0; // تم التصحيح أدناه
+
+      if (targetBank <= 0) {
+        return interaction.editReply({ content: `🛡️ هجمت عصابتك [ ${userData.gang} ] على مقرات [ ${targetGangName} ]، لكن خزينتهم كانت فارغة تماماً ولم تكسبوا شيئاً!` });
+      }
+
+      const stolenAmount = Math.floor(Math.min(targetBank, Math.random() * 5000 + 1000));
+      targetGang.bank -= stolenAmount;
+      data.gangs[userData.gang].bank = (data.gangs[userData.gang].bank || 0) + stolenAmount;
+      await saveData(data);
+
+      return interaction.editReply({ content: `⚔️🔥 **هجوم عصابة ناجح وسحيق!** أغارت عصابتك [ ${userData.gang} ] على مقرات عصابة **[ ${targetGangName} ]** ونهبت **${stolenAmount.toLocaleString()} عملة** من خزينتهم لصالح خزينة عصابتكم!` });
     }
 
     case 'لوحة_الصدارة': {
