@@ -12,6 +12,9 @@ const {
   Routes,
   SlashCommandBuilder,
   EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   Collection,
   Events
 } = require('discord.js');
@@ -37,7 +40,10 @@ function readData() {
   try {
     ensureDataFile();
     const raw = fs.readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (!parsed.gangs) parsed.gangs = {};
+    if (!parsed.users) parsed.users = {};
+    return parsed;
   } catch (err) {
     console.error('❌ خطأ في قراءة البيانات:', err.message);
     return { users: {}, gangs: {}, auctions: [], settings: {} };
@@ -56,10 +62,10 @@ function saveData(data) {
 
 // === عناصر السوق السوداء والأسلحة ===
 const WEAPONS = {
-  knife: { name: 'سكين حاد 🔪', price: 500, successBonus: 0.1, desc: 'سلاح خفيف يزيد نسبة نجاح السرقة قليلاً' },
-  pistol: { name: 'مسدس 9mm 🔫', price: 2000, successBonus: 0.25, desc: 'مسدس أساسي لفرض السيطرة' },
-  smg: { name: 'رشاش قصير 🪖', price: 7000, successBonus: 0.4, desc: 'رشاش سريع للعمليات الكبرى' },
-  armor: { name: 'درع واقي 🛡️', price: 4000, successBonus: 0, desc: 'يحميك من الغرامات عند فشل الجريمة' }
+  knife: { name: 'سكين حاد 🔪', price: 500, desc: 'سلاح خفيف يزيد نسبة نجاح السرقة قليلاً' },
+  pistol: { name: 'مسدس 9mm 🔫', price: 2000, desc: 'مسدس أساسي لفرض السيطرة' },
+  smg: { name: 'رشاش قصير 🪖', price: 7000, desc: 'رشاش سريع للعمليات الكبرى' },
+  armor: { name: 'درع واقي 🛡️', price: 4000, desc: 'يحميك من الغرامات عند فشل الجريمة' }
 };
 
 // === إعداد البوت ===
@@ -74,7 +80,7 @@ const client = new Client({
 
 client.commands = new Collection();
 
-// === تعريف الأوامر (شاملة الأوامر الجديدة) ===
+// === تعريف الأوامر ===
 const commands = [
   new SlashCommandBuilder()
     .setName('انضمام')
@@ -109,6 +115,34 @@ const commands = [
   new SlashCommandBuilder()
     .setName('سرقة')
     .setDescription('تنفيذ عملية سطو مسلح لجمع الأموال'),
+
+  new SlashCommandBuilder()
+    .setName('إنشاء_عصابة')
+    .setDescription('تأسيس عصابة جديدة خاصة بك (التكلفة: 5,000 عملة)')
+    .addStringOption(option =>
+      option.setName('الاسم')
+        .setDescription('اسم العصابة المراد تأسيسها')
+        .setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName('عصابتي')
+    .setDescription('عرض تفاصيل عصابتك ورصيد الخزينة مع الأزرار التفاعلية'),
+
+  new SlashCommandBuilder()
+    .setName('انضمام_عصابة')
+    .setDescription('الانضمام إلى عصابة موجودة')
+    .addStringOption(option =>
+      option.setName('الاسم')
+        .setDescription('اسم العصابة')
+        .setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName('تغذية_الخزينة')
+    .setDescription('التبرع بمبلغ مالي لصندوق عصابتك')
+    .addIntegerOption(option =>
+      option.setName('المبلغ')
+        .setDescription('المبلغ المراد تبرعه')
+        .setRequired(true)),
 
   new SlashCommandBuilder()
     .setName('تعويض')
@@ -152,35 +186,79 @@ client.once(Events.ClientReady, async () => {
   }
 });
 
-// === معالجة الأوامر ===
+// === معالجة الأوامر التفاعلية (Slash Commands) ===
 client.on(Events.InteractionCreate, async interaction => {
+  const data = readData();
+
+  // 1. معالجة الأزرار التفاعلية (Buttons)
+  if (interaction.isButton()) {
+    const userId = interaction.user.id;
+    const userData = data.users[userId];
+
+    if (!userData || !userData.gang) {
+      return interaction.reply({ content: '❌ أنت لست عضواً في أي عصابة!', ephemeral: true });
+    }
+
+    const gangName = userData.gang;
+    const gang = data.gangs[gangName];
+
+    if (!gang) {
+      return interaction.reply({ content: '❌ لم يتم العثور على بيانات العصابة!', ephemeral: true });
+    }
+
+    if (interaction.customId === 'btn_gang_members') {
+      const membersList = gang.members.map(mId => `<@${mId}>`).join('\n• ');
+      const embed = new EmbedBuilder()
+        .setColor('#8e44ad')
+        .setTitle(`👥 أعضاء عصابة [ ${gang.name} ]`)
+        .setDescription(`**الزعيم:** <@${gang.leader}>\n\n**الأعضاء (${gang.members.length}):**\n• ${membersList}`);
+      
+      return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    if (interaction.customId === 'btn_gang_deposit') {
+      return interaction.reply({
+        content: `💡 لتغذية خزينة عصابتك بالأموال، اكتب الأمر:\n\`/تغذية_الخزينة [المبلغ]\`\nمثال: \`/تغذية_الخزينة 1000\``,
+        ephemeral: true
+      });
+    }
+
+    if (interaction.customId === 'btn_gang_leave') {
+      if (gang.leader === userId) {
+        return interaction.reply({ content: '❌ لا يمكنك مغادرة العصابة بصفتك الزعيم! (يجب حل العصابة أو نقل القيادة).', ephemeral: true });
+      }
+
+      gang.members = gang.members.filter(m => m !== userId);
+      userData.gang = null;
+      saveData(data);
+
+      return interaction.reply({ content: `🚶‍♂️ لقد غادرت عصابة **${gang.name}** بنجاح.`, ephemeral: true });
+    }
+    return;
+  }
+
+  // 2. معالجة أوامر الشات
   if (!interaction.isChatInputCommand()) return;
 
   const { commandName, user, options } = interaction;
-  const data = readData();
   
-  // التأكد من وجود المستخدم في قاعدة البيانات
+  // ضمان إعداد بيانات المستخدم
   if (!data.users[user.id]) {
     data.users[user.id] = {
       balance: 1000,
       createdAt: new Date().toISOString(),
       dailyLast: null,
       gamesPlayed: 0,
-      inventory: { knife: 0, pistol: 0, smg: 0, armor: 0 }
+      inventory: { knife: 0, pistol: 0, smg: 0, armor: 0 },
+      gang: null
     };
   }
 
   const userData = data.users[user.id];
-  // ضمان وجود حقيبة الأرصدة للمستخدمين القدامى
-  if (!userData.inventory) {
-    userData.inventory = { knife: 0, pistol: 0, smg: 0, armor: 0 };
-  }
+  if (!userData.inventory) userData.inventory = { knife: 0, pistol: 0, smg: 0, armor: 0 };
 
   switch (commandName) {
     case 'انضمام': {
-      if (userData.gamesPlayed > 0 || userData.balance !== 1000) {
-        return interaction.reply({ content: '❌ لديك حساب مسجل بالفعل! استخدم `/حساب` لعرض بياناتك', ephemeral: true });
-      }
       return interaction.reply('✅ حسابك مفعل وجاهز بالفعل! استخدم `/حساب` لعرض رصيدك.');
     }
 
@@ -191,15 +269,120 @@ client.on(Events.InteractionCreate, async interaction => {
       }
       if (!invText) invText = 'لا توجد أسلحة أو دروع (تفقّد `/سوق_سوداء`)';
 
+      const gangInfo = userData.gang ? userData.gang : 'أعزب / بدون عصابة ❌';
+
       const embed = new EmbedBuilder()
         .setColor('#2ECC71')
         .setTitle(`📊 ملف المجرم: ${user.username}`)
         .addFields(
           { name: '💰 الرصيد النقدي', value: `${userData.balance.toLocaleString()} عملة`, inline: true },
+          { name: '🛡️ العصابة الحالية', value: gangInfo, inline: true },
           { name: '🎒 الترسانة والأدوات', value: invText, inline: false },
           { name: '📅 تاريخ الانضمام', value: `<t:${Math.floor(new Date(userData.createdAt).getTime() / 1000)}:D>`, inline: false }
         );
       return interaction.reply({ embeds: [embed] });
+    }
+
+    case 'إنشاء_عصابة': {
+      const name = options.getString('الاسم').trim();
+      const GANG_COST = 5000;
+
+      if (userData.gang) {
+        return interaction.reply({ content: `❌ أنت تنتمي بالفعل إلى عصابة **${userData.gang}**! يرجى مغادرتها أولاً.`, ephemeral: true });
+      }
+
+      if (userData.balance < GANG_COST) {
+        return interaction.reply({ content: `❌ أنت بحاجة إلى **${GANG_COST.toLocaleString()}** عملة لتأسيس عصابة جديدة!`, ephemeral: true });
+      }
+
+      if (data.gangs[name]) {
+        return interaction.reply({ content: '❌ هذا الاسم مستخدم بالفعل لعصابة أخرى! اختر اسماً آخر.', ephemeral: true });
+      }
+
+      userData.balance -= GANG_COST;
+      userData.gang = name;
+
+      data.gangs[name] = {
+        name: name,
+        leader: user.id,
+        bank: 0,
+        members: [user.id],
+        createdAt: new Date().toISOString()
+      };
+
+      saveData(data);
+
+      const embed = new EmbedBuilder()
+        .setColor('#9b59b6')
+        .setTitle('👑 تم تأسيس العصابة بنجاح!')
+        .setDescription(`مبارك! أصبحت الآن الزعيم الرسمي لعصابة **[ ${name} ]** 🔥\nاستخدم أمر \`/عصابتي\` لإدارة العصابة.`);
+
+      return interaction.reply({ embeds: [embed] });
+    }
+
+    case 'عصابتي': {
+      if (!userData.gang || !data.gangs[userData.gang]) {
+        return interaction.reply({ content: '❌ أنت لا تنتمي إلى أي عصابة حالياً! استعمل `/إنشاء_عصابة` أو `/انضمام_عصابة`.', ephemeral: true });
+      }
+
+      const gang = data.gangs[userData.gang];
+
+      const embed = new EmbedBuilder()
+        .setColor('#34495e')
+        .setTitle(`🏴‍☠️ لوحة تحكم عصابة: ${gang.name}`)
+        .addFields(
+          { name: '👑 الزعيم', value: `<@${gang.leader}>`, inline: true },
+          { name: '👥 عدد الأعضاء', value: `${gang.members.length} عضو`, inline: true },
+          { name: '💰 خزينة العصابة', value: `${gang.bank.toLocaleString()} عملة`, inline: true }
+        );
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('btn_gang_members').setLabel('👥 الأعضاء').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('btn_gang_deposit').setLabel('💰 إيداع بالخزينة').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('btn_gang_leave').setLabel('🚶‍♂️ مغادرة').setStyle(ButtonStyle.Danger)
+      );
+
+      return interaction.reply({ embeds: [embed], components: [row] });
+    }
+
+    case 'انضمام_عصابة': {
+      const name = options.getString('الاسم').trim();
+
+      if (userData.gang) {
+        return interaction.reply({ content: '❌ أنت تنتمي لعصابة بالفعل!', ephemeral: true });
+      }
+
+      if (!data.gangs[name]) {
+        return interaction.reply({ content: '❌ هذه العصابة غير موجودة! تأكد من كتابة الاسم بالشكل الصحيح.', ephemeral: true });
+      }
+
+      const gang = data.gangs[name];
+      gang.members.push(user.id);
+      userData.gang = name;
+
+      saveData(data);
+
+      return interaction.reply(`🎉 **مبروك!** انضممت رسمياً إلى صفوف عصابة **[ ${name} ]**!`);
+    }
+
+    case 'تغذية_الخزينة': {
+      const amount = options.getInteger('المبلغ');
+
+      if (!userData.gang || !data.gangs[userData.gang]) {
+        return interaction.reply({ content: '❌ أنت لست عضواً في أي عصابة!', ephemeral: true });
+      }
+
+      if (amount <= 0 || userData.balance < amount) {
+        return interaction.reply({ content: '❌ رصيدك لا يكفي لإيداع هذا المبلغ!', ephemeral: true });
+      }
+
+      const gang = data.gangs[userData.gang];
+      userData.balance -= amount;
+      gang.bank += amount;
+
+      saveData(data);
+
+      return interaction.reply(`💰 تم إيداع **${amount.toLocaleString()}** عملة في خزينة عصابة **${gang.name}** بنجاح!`);
     }
 
     case 'يومي': {
@@ -255,8 +438,7 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     case 'سرقة': {
-      // حساب نسبة النجاح بناءً على الأسلحة المملوكة
-      let baseChance = 0.4; // 40% نسبة نجاح أساسية
+      let baseChance = 0.4;
       if (userData.inventory.pistol > 0) baseChance += 0.15;
       if (userData.inventory.smg > 0) baseChance += 0.3;
       if (userData.inventory.knife > 0) baseChance += 0.05;
@@ -264,12 +446,11 @@ client.on(Events.InteractionCreate, async interaction => {
       const isSuccess = Math.random() < baseChance;
 
       if (isSuccess) {
-        const loot = Math.floor(Math.random() * 800) + 200; // ربح بين 200 و 1000
+        const loot = Math.floor(Math.random() * 800) + 200;
         userData.balance += loot;
         saveData(data);
         return interaction.reply(`🥷 **عملية سطو ناجحة!** هاجمت أحد المتاجر وهربت مع غنيمة بقيمة **${loot.toLocaleString()}** عملة! 💰✨`);
       } else {
-        // التحقق من وجود درع حماية
         if (userData.inventory.armor > 0) {
           userData.inventory.armor -= 1;
           saveData(data);
@@ -278,7 +459,7 @@ client.on(Events.InteractionCreate, async interaction => {
           const fine = Math.min(userData.balance, 300);
           userData.balance -= fine;
           saveData(data);
-          return interaction.reply(`🚨 **فشلت العملية وتم القبض عليك!** قامت الشرطة بتغريمك مبلغ **${fine.toLocaleString()}** عملة. (نصيحة: اشترِ درعاً واقياً من `/سوق_سوداء` للحماية).`);
+          return interaction.reply(`🚨 **فشلت العملية وتم القبض عليك!** قامت الشرطة بتغريمك مبلغ **${fine.toLocaleString()}** عملة.`);
         }
       }
     }
@@ -292,7 +473,7 @@ client.on(Events.InteractionCreate, async interaction => {
       const amount = options.getInteger('المبلغ');
       
       if (!data.users[targetUser.id]) {
-        data.users[targetUser.id] = { balance: 0, createdAt: new Date().toISOString(), dailyLast: null, gamesPlayed: 0, inventory: { knife: 0, pistol: 0, smg: 0, armor: 0 } };
+        data.users[targetUser.id] = { balance: 0, createdAt: new Date().toISOString(), dailyLast: null, gamesPlayed: 0, inventory: { knife: 0, pistol: 0, smg: 0, armor: 0 }, gang: null };
       }
       
       data.users[targetUser.id].balance += amount;
@@ -315,9 +496,10 @@ client.on(Events.InteractionCreate, async interaction => {
     case 'العاب': {
       return interaction.reply(`
 🎮 **أنشطة العصابات المتاحة:**
+> • \`/عصابتي\` - إدارة عصابتك بالأزرار التفاعلية
+> • \`/إنشاء_عصابة\` - تأسيس عصابة جديدة
 > • \`/سرقة\` - تنفيذ عملية سطو مسلح لجمع الأموال
 > • \`/سوق_سوداء\` - شراء الأسلحة والدروع
-> • \`/يومي\` - استلام دعم العصابة اليومي
       `);
     }
 
