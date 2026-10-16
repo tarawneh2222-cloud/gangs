@@ -50,6 +50,7 @@ const GameSchema = new mongoose.Schema({
   gangs: { type: Object, default: {} },
   bounties: { type: Object, default: {} },
   territories: { type: Object, default: {} },
+  activeWars: { type: Object, default: {} },
   settings: { type: Object, default: {} }
 }, { minimize: false });
 
@@ -69,6 +70,7 @@ async function readData() {
           users: {},
           gangs: {},
           bounties: {},
+          activeWars: {},
           territories: {
             bank: { name: '🏦 البنك المركزي', owner: null, tax: 2000 },
             port: { name: '🚢 الميناء المحصن', owner: null, tax: 1500 },
@@ -80,6 +82,7 @@ async function readData() {
       if (!dataObj.users) dataObj.users = {};
       if (!dataObj.gangs) dataObj.gangs = {};
       if (!dataObj.bounties) dataObj.bounties = {};
+      if (!dataObj.activeWars) dataObj.activeWars = {};
       if (!dataObj.territories) {
         dataObj.territories = {
           bank: { name: '🏦 البنك المركزي', owner: null, tax: 2000 },
@@ -99,10 +102,11 @@ async function readData() {
       if (!parsed.users) parsed.users = {};
       if (!parsed.gangs) parsed.gangs = {};
       if (!parsed.bounties) parsed.bounties = {};
+      if (!parsed.activeWars) parsed.activeWars = {};
       return parsed;
     }
   } catch (err) {}
-  return { users: {}, gangs: {}, bounties: {}, territories: {}, settings: {} };
+  return { users: {}, gangs: {}, bounties: {}, activeWars: {}, territories: {}, settings: {} };
 }
 
 async function saveData(data) {
@@ -116,6 +120,7 @@ async function saveData(data) {
             gangs: data.gangs,
             bounties: data.bounties,
             territories: data.territories,
+            activeWars: data.activeWars,
             settings: data.settings
           }
         },
@@ -326,11 +331,11 @@ function addXp(userData, amount) {
   return false;
 }
 
-// === 6. التفاعل الكامل مع الأزرار والقوائم والإنبوت ===
+// === 6. التفاعل الكامل مع الأزرار والقوائم والمودال وحرب العصابات ===
 client.on(Events.InteractionCreate, async interaction => {
   const data = await readData();
 
-  // A. معالجة القوائم المنسدلة (Select Menu) لشراء الأسلحة والترقيات
+  // A. معالجة القوائم المنسدلة (Select Menu) لشراء الأسلحة واحتلال المناطق
   if (interaction.isStringSelectMenu()) {
     const userId = interaction.user.id;
     initUser(data, userId);
@@ -361,10 +366,34 @@ client.on(Events.InteractionCreate, async interaction => {
         return interaction.reply({ content: `🛠️ **تم ترقية تجهيزك بـ ${up.name} بنجاح!**`, ephemeral: true });
       }
     }
+
+    if (interaction.customId === 'select_capture_territory') {
+      const terrKey = interaction.values[0];
+      const territory = data.territories[terrKey];
+
+      if (!userData.gang || !data.gangs[userData.gang]) {
+        return interaction.reply({ content: '❌ يجب أن تنتمي لعصابة لتستطيع السيطرة على المناطق!', ephemeral: true });
+      }
+
+      let captureChance = 0.50;
+      if (userData.inventory.smg > 0) captureChance += 0.25;
+      if (userData.inventory.car > 0) captureChance += 0.15;
+      if (userData.job === 'hitman') captureChance += 0.20;
+      if (userData.upgrades.thermal) captureChance += 0.15;
+
+      if (Math.random() < captureChance) {
+        territory.owner = userData.gang;
+        data.gangs[userData.gang].bank = (data.gangs[userData.gang].bank || 0) + territory.tax;
+        await saveData(data);
+        return interaction.reply({ content: `⚔️ **اقتحام وسيطرة ناجحة!** سيطرت عصابة **[ ${userData.gang} ]** على **${territory.name}** وجنت **${territory.tax.toLocaleString()}** عملة لخزينتها! 🔥`, ephemeral: true });
+      } else {
+        return interaction.reply({ content: `💥 **فشلت عملية السيطرة على ${territory.name}!** تصدت الحراسات للهجوم!`, ephemeral: true });
+      }
+    }
     return;
   }
 
-  // B. معالجة إدخال الأموال عبر Modal (الكازينو وغسيل الأموال)
+  // B. معالجة إدخال الأموال وإعلان الحرب عبر Modals
   if (interaction.isModalSubmit()) {
     const userId = interaction.user.id;
     initUser(data, userId);
@@ -404,14 +433,110 @@ client.on(Events.InteractionCreate, async interaction => {
         return interaction.reply({ content: `🎲 **تعادل!** رميتما **${playerRoll}**، تم استرداد المبلغ.`, ephemeral: true });
       }
     }
+
+    if (interaction.customId === 'modal_declare_gang_war') {
+      const targetGangName = interaction.fields.getTextInputValue('war_target_gang');
+      const betAmount = parseInt(interaction.fields.getTextInputValue('war_bet_amount'));
+
+      if (!userData.gang || !data.gangs[userData.gang]) {
+        return interaction.reply({ content: '❌ يجب أن تكون عضواً أو زعيماً لعصابة لإعلان الحرب!', ephemeral: true });
+      }
+
+      const myGang = data.gangs[userData.gang];
+      if (myGang.leader !== userId) {
+        return interaction.reply({ content: '❌ الزعيم فقط هو من يستطيع إعلان حرب العصابات!', ephemeral: true });
+      }
+
+      if (!data.gangs[targetGangName]) {
+        return interaction.reply({ content: '❌ العصابة المستهدفة غير موجودة!', ephemeral: true });
+      }
+
+      if (targetGangName === userData.gang) {
+        return interaction.reply({ content: '❌ لا يمكنك إعلان الحرب على عصابتك!', ephemeral: true });
+      }
+
+      if ((myGang.bank || 0) < betAmount) {
+        return interaction.reply({ content: `❌ خزينة عصابتك لا تكفي لمبلغ الرهان (${betAmount.toLocaleString()} عملة)!`, ephemeral: true });
+      }
+
+      const warId = `war_${Date.now()}`;
+      data.activeWars[warId] = {
+        attacker: userData.gang,
+        defender: targetGangName,
+        bet: betAmount,
+        attackerScore: 0,
+        defenderScore: 0,
+        participants: []
+      };
+
+      await saveData(data);
+
+      const embed = new EmbedBuilder()
+        .setColor('#e74c3c')
+        .setTitle('⚔️ إعلان حرب عصابات ملحمية جديدة!')
+        .setDescription(`أعلنت عصابة **[ ${userData.gang} ]** الحرب المسلحة على عصابة **[ ${targetGangName} ]**!\n💰 **مبلغ الرهان على المعركة:** **${betAmount.toLocaleString()}** عملة من الخزينة.`)
+        .addFields({ name: '📌 طريقة المشاركة:', value: 'انقر على زر `⚔️ المشاركة في الهجوم / الدفاع` بالأسفل للقتال لصالح عصابتك!' });
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`btn_join_war_${warId}`).setLabel('⚔️ الانضمام للمعركة المسلحة').setStyle(ButtonStyle.Danger)
+      );
+
+      return interaction.reply({ embeds: [embed], components: [row] });
+    }
     return;
   }
 
-  // C. معالجة ضغطات الأزرار الرئيسية الشاملة
+  // C. معالجة ضغطات الأزرار الرئيسية الشاملة وحرب العصابات
   if (interaction.isButton()) {
     const userId = interaction.user.id;
     initUser(data, userId);
     const userData = data.users[userId];
+
+    // الانضمام لمعركة حرب العصابات المباشرة
+    if (interaction.customId.startsWith('btn_join_war_')) {
+      const warId = interaction.customId.replace('btn_join_war_', '');
+      const war = data.activeWars[warId];
+
+      if (!war) return interaction.reply({ content: '❌ هذه المعركة انتهت بالفعل!', ephemeral: true });
+      if (!userData.gang) return interaction.reply({ content: '❌ يجب أن تكون عضواً في إحدى العصابتين المشاركتين!', ephemeral: true });
+      if (userData.gang !== war.attacker && userData.gang !== war.defender) {
+        return interaction.reply({ content: '❌ عصابتك ليست طرفاً في هذه الحرب!', ephemeral: true });
+      }
+
+      if (war.participants.includes(userId)) {
+        return interaction.reply({ content: '❌ لقد شاركت بالفعل في هذه المعركة!', ephemeral: true });
+      }
+
+      war.participants.push(userId);
+      let power = 1;
+      if (userData.inventory.smg > 0) power += 3;
+      if (userData.inventory.pistol > 0) power += 1;
+      if (userData.upgrades.thermal) power += 2;
+
+      if (userData.gang === war.attacker) {
+        war.attackerScore += power;
+      } else {
+        war.defenderScore += power;
+      }
+
+      await saveData(data);
+
+      let winner = null;
+      if (war.attackerScore >= 10) winner = war.attacker;
+      if (war.defenderScore >= 10) winner = war.defender;
+
+      if (winner) {
+        const loser = winner === war.attacker ? war.defender : war.attacker;
+        data.gangs[winner].bank = (data.gangs[winner].bank || 0) + war.bet;
+        data.gangs[loser].bank = Math.max(0, (data.gangs[loser].bank || 0) - war.bet);
+        delete data.activeWars[warId];
+        await saveData(data);
+
+        return interaction.reply({ content: `🏆💥 **انتصارات ملحمية!** فازت عصابة **[ ${winner} ]** بحرب العصابات واستولت على **${war.bet.toLocaleString()}** عملة من خزينة **[ ${loser} ]**!` });
+      }
+
+      return interaction.reply({ content: `⚔️ **انضممت للقتال!** أضفت قوة **+${power}** لصالح عصابتك [ ${userData.gang} ]!\nالنتيجة الحالية: المهاجم (${war.attackerScore}) vs المدافع (${war.defenderScore})`, ephemeral: true });
+    }
 
     // 1. زر حسابي
     if (interaction.customId === 'main_btn_account') {
@@ -558,7 +683,6 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
     }
 
-    // إجراء الكفالة عبر الأزرار
     if (interaction.customId === 'jail_btn_bail') {
       const now = Date.now();
       if ((userData.jailUntil || 0) <= now) return interaction.reply({ content: '❌ أنت لست مسجوناً!', ephemeral: true });
@@ -572,7 +696,6 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.reply({ content: `🔓 **خرجت من السجن بنجاح!** تم دفع الكفالة (${bailCost.toLocaleString()} عملة).`, ephemeral: true });
     }
 
-    // إجراء العمل الشاق عبر الأزرار
     if (interaction.customId === 'jail_btn_work') {
       const now = Date.now();
       if ((userData.jailUntil || 0) <= now) return interaction.reply({ content: '❌ أنت لست مسجوناً لتنفذ العمل الشاق!', ephemeral: true });
@@ -584,7 +707,6 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.reply({ content: `⛏️ **قمت بكسر الأحجار في السجن!** تم تقليص عقوبتك بـ **120 ثانية** وكسبت **${earned}** عملة.`, ephemeral: true });
     }
 
-    // إجراء تهريب السجن عبر الأزرار
     if (interaction.customId === 'jail_btn_breakout') {
       const now = Date.now();
       if (!userData.gang || !data.gangs[userData.gang]) return interaction.reply({ content: '❌ يجب أن تنتمي لعصابة لتنفذ عملية تهريب!', ephemeral: true });
@@ -644,7 +766,49 @@ client.on(Events.InteractionCreate, async interaction => {
       }
     }
 
-    // 8. المهن والتنقل
+    // 8. زر حرب العصابات والاحتلال الشامل
+    if (interaction.customId === 'main_btn_gang_wars') {
+      const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId('select_capture_territory')
+        .setPlaceholder('🗺️ اختر المنطقة لاحتلالها لصالح عصابتك...')
+        .addOptions([
+          { label: '🏦 البنك المركزي', description: 'أرباح الخزينة: 2,000 عملة', value: 'bank' },
+          { label: '🚢 الميناء المحصن', description: 'أرباح الخزينة: 1,500 عملة', value: 'port' },
+          { label: '🍸 الملهى الليلي', description: 'أرباح الخزينة: 1,000 عملة', value: 'club' }
+        ]);
+
+      const row1 = new ActionRowBuilder().addComponents(selectMenu);
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('btn_declare_gang_war').setLabel('⚔️ إعلان حرب عصابات مسلحة').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('btn_ambush_convoy').setLabel('🚛 مهاجمة شاحنة الأسلحة المهربة').setStyle(ButtonStyle.Success)
+      );
+
+      return interaction.reply({ content: '⚔️ **لوحة حرب العصابات والسيطرة على الأحياء:**', components: [row1, row2], ephemeral: true });
+    }
+
+    if (interaction.customId === 'btn_declare_gang_war') {
+      const modal = new ModalBuilder().setCustomId('modal_declare_gang_war').setTitle('⚔️ إعلان حرب بين العصابات');
+      const targetInput = new TextInputBuilder().setCustomId('war_target_gang').setLabel('اسم العصابة المستهدفة:').setStyle(TextInputStyle.Short).setRequired(true);
+      const betInput = new TextInputBuilder().setCustomId('war_bet_amount').setLabel('مبلغ الرهان من خزينة العصابة:').setStyle(TextInputStyle.Short).setRequired(true);
+
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(targetInput),
+        new ActionRowBuilder().addComponents(betInput)
+      );
+      return interaction.showModal(modal);
+    }
+
+    if (interaction.customId === 'btn_ambush_convoy') {
+      if (!userData.gang) return interaction.reply({ content: '❌ يجب أن تنتمي لعصابة للاستيلاء على شاحنة الأسلحة!', ephemeral: true });
+
+      const lootMoney = Math.floor(Math.random() * 4000) + 2000;
+      data.gangs[userData.gang].bank = (data.gangs[userData.gang].bank || 0) + lootMoney;
+      await saveData(data);
+
+      return interaction.reply({ content: `🚛💥 **هجوم ناجح على الشاحنة!** استولت عصابتك [ ${userData.gang} ] على شحنة أسلحة وغنائم بقيمة **${lootMoney.toLocaleString()}** عملة تم إيداعها بخزينة العصابة!`, ephemeral: true });
+    }
+
+    // 9. المهن والتنقل
     if (interaction.customId === 'main_btn_jobs') {
       const currentJobText = userData.job ? JOBS[userData.job].name : 'بدون مهنة ❌';
       const embed = new EmbedBuilder()
@@ -673,7 +837,7 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.reply({ content: `🎉 **تعينت رسمياً بمهنة ${JOBS[selectedJobKey].name}!**`, ephemeral: true });
     }
 
-    // 9. قائمة المطلوبات والعصابات واللوحات
+    // 10. قائمة المطلوبات والعصابات واللوحات
     if (interaction.customId === 'main_btn_wanted') {
       let bountyText = '';
       for (const [targetId, amount] of Object.entries(data.bounties || {})) {
@@ -709,7 +873,7 @@ client.on(Events.InteractionCreate, async interaction => {
       const embed = new EmbedBuilder()
         .setColor('#e74c3c')
         .setTitle('🏛️ لوحة التحكم التفاعلية الشاملة لعالم العصابات')
-        .setDescription('انقر على الأزرار بالأسفل لتشغيل كافة الأوامر والأنظمة بضغطة زر واحدة بدون تعقيد: 🔥');
+        .setDescription('انقر على الأزرار بالأسفل لتشغيل كافة الأوامر والأنظمة وحروب العصابات بضغطة زر واحدة: 🔥');
 
       const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('main_btn_account').setLabel('💳 حسابي').setStyle(ButtonStyle.Primary),
@@ -723,11 +887,16 @@ client.on(Events.InteractionCreate, async interaction => {
         new ButtonBuilder().setCustomId('main_btn_market').setLabel('🛒 السوق والترقيات').setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId('main_btn_jail').setLabel('🚔 السجن والتهريب').setStyle(ButtonStyle.Danger),
         new ButtonBuilder().setCustomId('main_btn_casino').setLabel('🎲 الكازينو والسطو').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('main_btn_jobs').setLabel('🎭 المهن').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('main_btn_wanted').setLabel('🎯 المطلوبين').setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId('main_btn_gang_wars').setLabel('⚔️ حرب العصابات والأحياء').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('main_btn_jobs').setLabel('🎭 المهن').setStyle(ButtonStyle.Primary)
       );
 
-      return interaction.editReply({ embeds: [embed], components: [row1, row2] });
+      const row3 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('main_btn_wanted').setLabel('🎯 المطلوبين').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('main_btn_leaderboard').setLabel('🏆 الصدارة').setStyle(ButtonStyle.Secondary)
+      );
+
+      return interaction.editReply({ embeds: [embed], components: [row1, row2, row3] });
     }
 
     case 'انضمام': {
@@ -736,7 +905,7 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     default:
-      return interaction.editReply({ content: '✅ الأمر متاح من خلال لوحة الأزرار التفاعلية عبر `/قائمة`!' });
+      return interaction.editReply({ content: '✅ جميع الخصائص متوفرة عبر لوحة الأزرار التفاعلية باستعمال `/قائمة`!' });
   }
 });
 
