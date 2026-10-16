@@ -575,4 +575,130 @@ client.on(Events.InteractionCreate, async interaction => {
       const row2 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('main_btn_wash').setLabel('🧼 غسيل أموال').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('main_btn_market').setLabel('🛒 السوق').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().set
+        new ButtonBuilder().setCustomId('main_btn_jail').setLabel('🚔 السجن').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('main_btn_casino').setLabel('🎲 الكازينو').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('main_btn_gang_wars').setLabel('🚚 الشاحنة').setStyle(ButtonStyle.Danger)
+      );
+
+      const row3 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('main_btn_mayor').setLabel('👑 الحاكم').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('main_btn_police').setLabel('🚓 الشرطة').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('main_btn_jobs').setLabel('🎭 المهن').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('main_btn_wanted').setLabel('🎯 المطلوبين').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('main_btn_leaderboard').setLabel('🏆 الصدارة').setStyle(ButtonStyle.Secondary)
+      );
+
+      return interaction.editReply({ embeds: [embed], components: [row1, row2, row3] });
+    }
+
+    case 'حساب': {
+      const jobName = userData.job ? JOBS[userData.job].name : 'بدون مهنة ❌';
+      const embed = new EmbedBuilder().setColor('#2ECC71').setTitle(`📊 حساب المجرم: ${user.username}`).addFields(
+        { name: '💰 الكاش', value: `${userData.balance.toLocaleString()}`, inline: true },
+        { name: '🏦 البنك', value: `${userData.cleanBalance.toLocaleString()}`, inline: true },
+        { name: '🎭 المهنة', value: jobName, inline: true },
+        { name: '🛡️ العصابة', value: userData.gang || 'بدون عصابة', inline: true }
+      );
+      return interaction.editReply({ embeds: [embed] });
+    }
+
+    case 'يومي': {
+      if (now - (userData.dailyLast || 0) < 24 * 3600 * 1000) return interaction.editReply({ content: '❌ استلمت مكافأتك اليومية مسبقاً!' });
+      userData.dailyLast = now;
+      userData.balance += 1500;
+      await saveData(data);
+      return interaction.editReply({ content: '🎉 حصلت على مكافأتك اليومية (1,500 عملة)!' });
+    }
+
+    case 'سرقة': {
+      const resMsg = await handleRobbery(userData);
+      await saveData(data);
+      return interaction.editReply({ content: resMsg });
+    }
+
+    case 'المطلوبين': {
+      let bountyText = '';
+      for (const [tId, amount] of Object.entries(data.bounties || {})) {
+        if (amount > 0) bountyText += `• المطلوب: <@${tId}> ➔ مكافأة اغتيال **${amount.toLocaleString()}** عملة 🎯\n`;
+      }
+      const embed = new EmbedBuilder().setColor('#e74c3c').setTitle('🎯 قائمة المطلوبين أمنياً').setDescription(bountyText || 'لا يوجد مطلوبين حالياً في المدينة! 🕊️');
+      return interaction.editReply({ embeds: [embed] });
+    }
+
+    case 'السجن': {
+      let jailList = '';
+      for (const [id, u] of Object.entries(data.users || {})) {
+        if ((u.jailUntil || 0) > now) {
+          const rem = Math.ceil((u.jailUntil - now) / 1000);
+          jailList += `• <@${id}> — متبقي **${rem} ثانية**\n`;
+        }
+      }
+      const embed = new EmbedBuilder().setColor('#c0392b').setTitle('🚔 السجن المركزي').setDescription(jailList || 'السجن خالي تماماً حالياً! 🕊️');
+      return interaction.editReply({ embeds: [embed] });
+    }
+
+    case 'كفالة': {
+      if ((userData.jailUntil || 0) <= now) return interaction.editReply({ content: '❌ أنت لست مسجوناً!' });
+      const cost = userData.job === 'lawyer' ? 2500 : 5000;
+      if (userData.balance < cost) return interaction.editReply({ content: `❌ رصيدك لا يكفي للكفالة (${cost} عملة)!` });
+      userData.balance -= cost;
+      userData.jailUntil = 0;
+      await saveData(data);
+      return interaction.editReply({ content: '🔓 **تم دفع الكفالة وخرجت من السجن بنجاح!**' });
+    }
+
+    case 'عصابتي': {
+      if (!userData.gang || !data.gangs[userData.gang]) return interaction.editReply({ content: '❌ أنت لست عضواً في عصابة!' });
+      const g = data.gangs[userData.gang];
+      return interaction.editReply({ content: `🛡️ **عصابتك: ${userData.gang}** | الزعيم: <@${g.leader}> | الرصيد: ${(g.bank || 0).toLocaleString()} عملة` });
+    }
+
+    case 'إنشاء_عصابة': {
+      const gangName = options.getString('الاسم');
+      if (userData.gang) return interaction.editReply({ content: '❌ أنت تنتمي لعصابة بالفعل!' });
+      if (userData.balance < 5000) return interaction.editReply({ content: '❌ تحتاج إلى 5,000 عملة لإنشاء عصابة!' });
+      if (data.gangs[gangName]) return interaction.editReply({ content: '❌ اسم العصابة مستخدم مسبقاً!' });
+
+      userData.balance -= 5000;
+      userData.gang = gangName;
+      data.gangs[gangName] = { name: gangName, leader: user.id, bank: 0, members: [user.id] };
+      await saveData(data);
+      return interaction.editReply({ content: `🎉 **تم تأسيس عصابة [ ${gangName} ] بنجاح!**` });
+    }
+
+    case 'لوحة_الصدارة': {
+      const sorted = Object.entries(data.users || {})
+        .map(([id, u]) => ({ id, total: (u.balance || 0) + (u.cleanBalance || 0) }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 5);
+      const topText = sorted.map((u, i) => `${i + 1}. <@${u.id}> — **${u.total.toLocaleString()}** عملة`).join('\n');
+      return interaction.editReply({ embeds: [new EmbedBuilder().setColor('#f1c40f').setTitle('🏆 أثرياء المدينة').setDescription(topText || 'لا يوجد')] });
+    }
+
+    case 'تعويض': {
+      if (!interaction.member.permissions.has('Administrator')) return interaction.editReply({ content: '❌ للمشرفين فقط!' });
+      const target = options.getUser('الشخص');
+      const amt = options.getInteger('المبلغ');
+      initUser(data, target.id);
+      data.users[target.id].balance += amt;
+      await saveData(data);
+      return interaction.editReply({ content: `✅ تم إضافة تعويض بقيمة **${amt.toLocaleString()} عملة** لـ <@${target.id}>!` });
+    }
+
+    case 'انضمام': {
+      await saveData(data);
+      return interaction.editReply({ content: '✅ تم تفعيل حسابك بنجاح!' });
+    }
+
+    default:
+      return interaction.editReply({ content: '✅ تم تنفيذ الأمر بنجاح!' });
+  }
+});
+
+const token = process.env.DISCORD_TOKEN;
+if (!token) {
+  console.error('❌ DISCORD_TOKEN غير موجود!');
+  process.exit(1);
+}
+
+client.login(token);
