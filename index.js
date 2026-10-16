@@ -242,7 +242,7 @@ function initUser(data, userId) {
 // === نظام التهدئة 30 دقيقة للسرقة ===
 async function handleRobbery(userData) {
   const now = Date.now();
-  const cooldown = 30 * 60 * 1000; // 30 دقيقة
+  const cooldown = 30 * 60 * 1000;
   if (now - (userData.lastRob || 0) < cooldown) {
     const remainingMins = Math.ceil((cooldown - (now - userData.lastRob)) / 60000);
     return `⏱️ **يجب عليك الانتظار ${remainingMins} دقيقة** قبل إتمام عملية سرقة أخرى!`;
@@ -256,7 +256,7 @@ async function handleRobbery(userData) {
 // === نظام التهدئة 30 دقيقة للكازينو ===
 async function handleCasino(userData) {
   const now = Date.now();
-  const cooldown = 30 * 60 * 1000; // 30 دقيقة
+  const cooldown = 30 * 60 * 1000;
   if (now - (userData.lastCasino || 0) < cooldown) {
     const remainingMins = Math.ceil((cooldown - (now - userData.lastCasino)) / 60000);
     return `⏱️ **أنت متسرع يا مجرم!** انتظر ${remainingMins} دقيقة قبل تجربة حظك مرة أخرى في الكازينو.`;
@@ -307,6 +307,36 @@ client.on(Events.InteractionCreate, async interaction => {
     const userId = interaction.user.id;
     initUser(data, userId);
     const userData = data.users[userId];
+
+    if (interaction.customId === 'modal_deposit_gang') {
+      if (!userData.gang || !data.gangs[userData.gang]) {
+        return interaction.reply({ content: '❌ أنت لست عضواً في عصابة لإيداع الأموال فيها!', ephemeral: true });
+      }
+      const amount = parseInt(interaction.fields.getTextInputValue('gang_deposit_amount'));
+      if (isNaN(amount) || amount <= 0 || userData.balance < amount) {
+        return interaction.reply({ content: '❌ مبلغ غير صالح أو رصيدك الشخصي لا يكفي!', ephemeral: true });
+      }
+      userData.balance -= amount;
+      data.gangs[userData.gang].bank = (data.gangs[userData.gang].bank || 0) + amount;
+      await saveData(data);
+      return interaction.reply({ content: `📥 **تم إيداع ${amount.toLocaleString()} عملة** بنجاح في خزينة عصابة **[ ${userData.gang} ]**!`, ephemeral: true });
+    }
+
+    if (interaction.customId === 'modal_bail_member') {
+      const targetId = interaction.fields.getTextInputValue('bail_target_id').trim();
+      const now = Date.now();
+      if (!data.users[targetId] || (data.users[targetId].jailUntil || 0) <= now) {
+        return interaction.reply({ content: '❌ هذا العضو ليس مسجوناً حالياً!', ephemeral: true });
+      }
+      const cost = 5000;
+      if (userData.balance < cost) {
+        return interaction.reply({ content: `❌ رصيدك لا يكفي لدفع كفالة العضو (${cost.toLocaleString()} عملة)!`, ephemeral: true });
+      }
+      userData.balance -= cost;
+      data.users[targetId].jailUntil = 0;
+      await saveData(data);
+      return interaction.reply({ content: `🔓🤝 **تم دفع الكفالة عن <@${targetId}> بنجاح وتم إطلاق سراحه من السجن!**` });
+    }
 
     if (interaction.customId === 'modal_wash_money') {
       const amount = parseInt(interaction.fields.getTextInputValue('wash_amount_input'));
@@ -432,7 +462,8 @@ client.on(Events.InteractionCreate, async interaction => {
       }
       const embed = new EmbedBuilder().setColor('#c0392b').setTitle('🚔 السجن المركزي').setDescription(jailList || 'السجن خالي تماماً حالياً! 🕊️');
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('jail_btn_bail').setLabel('🔓 دفع كفالة (5,000)').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('jail_btn_bail').setLabel('🔓 دفع كفالتي (5,000)').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('jail_btn_bail_member').setLabel('🤝 دفع كفالة عن عضو').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('jail_btn_work').setLabel('⛏️ عمل شاق').setStyle(ButtonStyle.Secondary)
       );
       return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
@@ -448,6 +479,12 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.reply({ content: '🔓 **تم دفع الكفالة وخرجت من السجن بنجاح!**', ephemeral: true });
     }
 
+    if (interaction.customId === 'jail_btn_bail_member') {
+      const modal = new ModalBuilder().setCustomId('modal_bail_member').setTitle('🤝 دفع كفالة عن عضو مسجون');
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('bail_target_id').setLabel('Discord ID للعضو المسجون:').setStyle(TextInputStyle.Short).setRequired(true)));
+      return interaction.showModal(modal);
+    }
+
     if (interaction.customId === 'jail_btn_work') {
       if ((userData.jailUntil || 0) <= now) return interaction.reply({ content: '❌ أنت لست مسجوناً!', ephemeral: true });
       userData.jailUntil = Math.max(now, userData.jailUntil - (120 * 1000));
@@ -461,6 +498,28 @@ client.on(Events.InteractionCreate, async interaction => {
       const res = await handleCasino(userData);
       await saveData(data);
       return interaction.reply({ content: res, ephemeral: true });
+    }
+
+    // === العصابات وتفاصيلها ===
+    if (interaction.customId === 'main_btn_gang') {
+      if (!userData.gang || !data.gangs[userData.gang]) return interaction.reply({ content: '❌ أنت لست عضواً في أي عصابة!', ephemeral: true });
+      const g = data.gangs[userData.gang];
+      const embed = new EmbedBuilder().setColor('#e67e22').setTitle(`🛡️ تفاصيل عصابة: ${userData.gang}`).addFields(
+        { name: '👑 الزعيم', value: `<@${g.leader}>`, inline: true },
+        { name: '💰 خزينة العصابة', value: `${(g.bank || 0).toLocaleString()} عملة`, inline: true }
+      );
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('btn_open_deposit_gang').setLabel('📥 إيداع بخزينة العصابة').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('jail_btn_bail_member').setLabel('🤝 دفع كفالة عن عضو').setStyle(ButtonStyle.Primary)
+      );
+      return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+    }
+
+    if (interaction.customId === 'btn_open_deposit_gang') {
+      if (!userData.gang || !data.gangs[userData.gang]) return interaction.reply({ content: '❌ أنت لست عضواً في عصابة!', ephemeral: true });
+      const modal = new ModalBuilder().setCustomId('modal_deposit_gang').setTitle('📥 إيداع بخزينة العصابة');
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('gang_deposit_amount').setLabel('المبلغ المراد إيداعه:').setStyle(TextInputStyle.Short).setRequired(true)));
+      return interaction.showModal(modal);
     }
 
     // === شاحنات التهريب والأحياء ===
@@ -591,16 +650,6 @@ client.on(Events.InteractionCreate, async interaction => {
       ]);
       const embed = new EmbedBuilder().setColor('#9b59b6').setTitle('🎭 مكتب اختيار المهن الإجرامية').setDescription('اختر مهنتك من القائمة أدناه للاستفادة من مميزاتها الفريدة:');
       return interaction.reply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(menu)], ephemeral: true });
-    }
-
-    if (interaction.customId === 'main_btn_gang') {
-      if (!userData.gang || !data.gangs[userData.gang]) return interaction.reply({ content: '❌ أنت لست عضواً في أي عصابة!', ephemeral: true });
-      const g = data.gangs[userData.gang];
-      const embed = new EmbedBuilder().setColor('#e67e22').setTitle(`🛡️ تفاصيل عصابة: ${userData.gang}`).addFields(
-        { name: '👑 الزعيم', value: `<@${g.leader}>`, inline: true },
-        { name: '💰 خزينة العصابة', value: `${(g.bank || 0).toLocaleString()} عملة`, inline: true }
-      );
-      return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
     if (interaction.customId === 'main_btn_leaderboard') {
@@ -740,7 +789,7 @@ client.on(Events.InteractionCreate, async interaction => {
         return interaction.editReply({ content: `❌ العصابة المستهدفة "${targetGangName}" غير موجودة أو وهمية!` });
       }
 
-      const cooldown = 30 * 60 * 1000; // 30 دقيقة تهدئة للهجوم
+      const cooldown = 30 * 60 * 1000;
       if (now - (userData.lastGangAttack || 0) < cooldown) {
         const remMins = Math.ceil((cooldown - (now - userData.lastGangAttack)) / 60000);
         return interaction.editReply({ content: `⏱️ يجب الانتظار ${remMins} دقيقة قبل شن هجوم عصابة آخر!` });
@@ -748,7 +797,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
       userData.lastGangAttack = now;
       const targetGang = data.gangs[targetGangName];
-      const targetBank = targetgang.bank || 0; // تم التصحيح أدناه
+      const targetBank = targetGang.bank || 0;
 
       if (targetBank <= 0) {
         return interaction.editReply({ content: `🛡️ هجمت عصابتك [ ${userData.gang} ] على مقرات [ ${targetGangName} ]، لكن خزينتهم كانت فارغة تماماً ولم تكسبوا شيئاً!` });
