@@ -384,7 +384,7 @@ client.on(Events.InteractionCreate, async interaction => {
       data.users[targetId].jailUntil = Date.now() + (15 * 60 * 1000);
       userData.balance += 1500;
       await saveData(data);
-      return interaction.reply({ content: `i🚓🚨 **تم القبض على المجرم <@${targetId}> وسجنه 15 دقيقة بنجاح!**` });
+      return interaction.reply({ content: `🚓🚨 **تم القبض على المجرم <@${targetId}> وسجنه 15 دقيقة بنجاح!**` });
     }
 
     if (interaction.customId === 'modal_send_convoy') {
@@ -494,7 +494,7 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     if (interaction.customId === 'jail_btn_breakout') {
-      if (!userData.gang) return interaction.reply({ content: '❌ تحتاج للانتماء لعصابة للتخطيط لاقتحام مسجح السجن!', ephemeral: true });
+      if (!userData.gang) return interaction.reply({ content: '❌ تحتاج للانتماء لعصابة للتخطيط لاقتحام السجن!', ephemeral: true });
       const hasGuns = (userData.inventory.smg || 0) > 0 || (userData.inventory.pistol || 0) > 0;
       const successChance = hasGuns ? 0.65 : 0.25;
 
@@ -878,3 +878,87 @@ client.on(Events.InteractionCreate, async interaction => {
       if (userData.gang) return interaction.editReply({ content: '❌ أنت تنتمي لعصابة بالفعل!' });
       if (userData.balance < 5000) return interaction.editReply({ content: '❌ تحتاج إلى 5,000 عملة لإنشاء عصابة!' });
       if (data.gangs[gangName]) return interaction.editReply({ content: '❌ اسم العصابة مستخدم مسبقاً!' });
+
+      userData.balance -= 5000;
+      userData.gang = gangName;
+      data.gangs[gangName] = { name: gangName, leader: user.id, bank: 0, members: [user.id] };
+      
+      if (userData.job === 'cop') {
+        userData.job = null;
+        data.policeForce = data.policeForce.filter(id => id !== user.id);
+      }
+
+      await saveData(data);
+      return interaction.editReply({ content: `🎉 **تم تأسيس عصابة [ ${gangName} ] بنجاح!**` });
+    }
+
+    case 'هجوم_عصابة': {
+      if (!userData.gang || !data.gangs[userData.gang]) {
+        return interaction.editReply({ content: '❌ يجب أن تنتمي لعصابة لتستطيع مهاجمة العصابات الأخرى!' });
+      }
+      const targetGangName = options.getString('اسم_العصابة');
+      if (targetGangName === userData.gang) {
+        return interaction.editReply({ content: '❌ لا يمكنك مهاجمة عصابتك!' });
+      }
+      if (!data.gangs[targetGangName]) {
+        return interaction.editReply({ content: `❌ العصابة المستهدفة "${targetGangName}" غير موجودة أو وهمية!` });
+      }
+
+      const cooldown = 30 * 60 * 1000;
+      if (now - (userData.lastGangAttack || 0) < cooldown) {
+        const remMins = Math.ceil((cooldown - (now - userData.lastGangAttack)) / 60000);
+        return interaction.editReply({ content: `⏱️ يجب الانتظار ${remMins} دقيقة قبل شن هجوم عصابة آخر!` });
+      }
+
+      userData.lastGangAttack = now;
+      const targetGang = data.gangs[targetGangName];
+      const targetBank = targetGang.bank || 0;
+
+      if (targetBank <= 0) {
+        return interaction.editReply({ content: `🛡️ هجمت عصابتك [ ${userData.gang} ] على مقرات [ ${targetGangName} ]، لكن خزينتهم كانت فارغة تماماً ولم تكسبوا شيئاً!` });
+      }
+
+      const stolenAmount = Math.floor(Math.min(targetBank, Math.random() * 5000 + 1000));
+      targetGang.bank -= stolenAmount;
+      data.gangs[userData.gang].bank = (data.gangs[userData.gang].bank || 0) + stolenAmount;
+      await saveData(data);
+
+      return interaction.editReply({ content: `⚔️🔥 **هجوم عصابة ناجح وسحيق!** أغارت عصابتك [ ${userData.gang} ] على مقرات عصابة **[ ${targetGangName} ]** ونهبت **${stolenAmount.toLocaleString()} عملة** من خزينتهم لصالح خزينة عصابتكم!` });
+    }
+
+    case 'لوحة_الصدارة': {
+      const sorted = Object.entries(data.users || {})
+        .map(([id, u]) => ({ id, total: (u.balance || 0) + (u.cleanBalance || 0) }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 5);
+      const topText = sorted.map((u, i) => `${i + 1}. <@${u.id}> — **${u.total.toLocaleString()}** عملة`).join('\n');
+      return interaction.editReply({ embeds: [new EmbedBuilder().setColor('#f1c40f').setTitle('🏆 أثرياء المدينة').setDescription(topText || 'لا يوجد')] });
+    }
+
+    case 'تعويض': {
+      if (!interaction.member.permissions.has('Administrator')) return interaction.editReply({ content: '❌ للمشرفين فقط!' });
+      const target = options.getUser('الشخص');
+      const amt = options.getInteger('المبلغ');
+      initUser(data, target.id);
+      data.users[target.id].balance += amt;
+      await saveData(data);
+      return interaction.editReply({ content: `✅ تم إضافة تعويض بقيمة **${amt.toLocaleString()} عملة** لـ <@${target.id}>!` });
+    }
+
+    case 'انضمام': {
+      await saveData(data);
+      return interaction.editReply({ content: '✅ تم تفعيل حسابك بنجاح!' });
+    }
+
+    default:
+      return interaction.editReply({ content: '✅ تم تنفيذ الأمر بنجاح!' });
+  }
+});
+
+const token = process.env.DISCORD_TOKEN;
+if (!token) {
+  console.error('❌ DISCORD_TOKEN غير موجود!');
+  process.exit(1);
+}
+
+client.login(token);
