@@ -129,13 +129,18 @@ async function saveData(data) {
   } catch (err) {}
 }
 
-// === 4. الأسلحة والمهن ===
+// === 4. الأسلحة والترقيات والمهن ===
 const WEAPONS = {
   knife: { name: 'سكين حاد 🔪', price: 500, desc: 'سلاح خفيف يزيد نسبة النجاح' },
   pistol: { name: 'مسدس 9mm 🔫', price: 2000, desc: 'يزيد نسبة الخطف بـ 15%' },
   smg: { name: 'رشاش قصير 🪖', price: 7000, desc: 'مخصص للاغتيالات والاحتلال' },
   armor: { name: 'درع واقي 🛡️', price: 4000, desc: 'يحميك من السجن والغرامة' },
   car: { name: 'سيارة هرب سريعة 🏎️', price: 15000, desc: 'تزيد نسبة النجاح والفرار بـ 15%' }
+};
+
+const UPGRADES = {
+  silencer: { name: 'كاتم صوت للمسدس 🤫', price: 5000, desc: 'يقلل فرصة القبض عليك عند الخطف والسرقة بنسبة 20%' },
+  thermal: { name: 'منظار حراري للرشاش 🎯', price: 12000, desc: 'يرفع نسبة نجاح الاغتيال والاحتلال إلى أقصى حد' }
 };
 
 const JOBS = {
@@ -146,7 +151,7 @@ const JOBS = {
   spy: { name: '🕵️ الجاسوس', desc: 'إمكانية استخدام أمر `/تجسس` لكشف حسابات ومعدات الخصوم.' },
   medic: { name: '🩺 طبيب السوق السوداء', desc: 'تخفيض غرامات القبض 50% وإمكانية استخدام `/إسعاف` للمسجونين.' },
   demo: { name: '💣 خبير المتفجرات', desc: 'زيادة القوة التدميرية ونسبة نجاح السرقات الكبرى.' },
-  lawyer: { name: '⚖️ المحامي الفاسد', desc: 'تخفيض الكفالة لـ 500 عملة وتقليل مدة السجن للنصف تلقائياً.' }
+  lawyer: { name: '⚖️ المحامي الفاسد', desc: 'تخفيض الكفالة لـ 2,500 عملة وتقليل مدة السجن للنصف تلقائياً.' }
 };
 
 const client = new Client({
@@ -160,12 +165,13 @@ const client = new Client({
 
 client.commands = new Collection();
 
-// === 5. تسجيل الأوامر البرمجية الكاملة ===
+// === 5. تسجيل الأوامر البرمجية ===
 const commands = [
-  new SlashCommandBuilder().setName('قائمة').setDescription('عرض لوحة التحكم الرئيسية واللوحات التفاعلية بالأزرار'),
+  new SlashCommandBuilder().setName('قائمة').setDescription('عرض لوحة التحكم الرئيسية واللوحات التفاعلية بالأزرار الشاملة'),
   new SlashCommandBuilder().setName('انضمام').setDescription('إنشاء وتفعيل حساب جديد'),
   new SlashCommandBuilder().setName('حساب').setDescription('عرض بيانات حسابك ومستواك وترسانتك'),
   new SlashCommandBuilder().setName('يومي').setDescription('الحصول على المكافأة اليومية'),
+  new SlashCommandBuilder().setName('صندوق_يومي').setDescription('فتح صندوق الهدايا والغنيمة اليومية العشوائية'),
   new SlashCommandBuilder().setName('سوق_سوداء').setDescription('شراء الأسلحة والسيارات والدروع'),
   new SlashCommandBuilder()
     .setName('شراء')
@@ -179,6 +185,13 @@ const commands = [
           { name: 'درع واقي (4000)', value: 'armor' },
           { name: 'سيارة هرب (15000)', value: 'car' }
         )),
+  new SlashCommandBuilder()
+    .setName('ترقية')
+    .setDescription('ترقية المعدات والأسلحة')
+    .addStringOption(opt => opt.setName('الترقية').setDescription('اختر الترقية').setRequired(true).addChoices(
+      { name: 'كاتم صوت للمسدس (5000)', value: 'silencer' },
+      { name: 'منظار حراري للرشاش (12000)', value: 'thermal' }
+    )),
   new SlashCommandBuilder().setName('سرقة').setDescription('تنفيذ عملية سطو مسلح لجمع الأموال'),
   new SlashCommandBuilder()
     .setName('تحويل')
@@ -192,6 +205,7 @@ const commands = [
     .addIntegerOption(opt => opt.setName('المكافأة').setDescription('المبلغ المرصود').setRequired(true)),
   new SlashCommandBuilder().setName('المطلوبين').setDescription('عرض لائحة الأشخاص المطلوب اغتيالهم والمكافآت'),
   new SlashCommandBuilder().setName('عمل_شاق').setDescription('كسر الأحجار لتقليص مدة عقوبة السجن'),
+  new SlashCommandBuilder().setName('تهريب').setDescription('تنفيذ عملية هجوم مسلح لتحرير أعضاء عصابتك من السجن'),
   // أوامر المهن التفاعلية
   new SlashCommandBuilder().setName('تجسس').setDescription('خاص للجاسوس: كشف رصيد ومعدات لاعب آخر').addUserOption(opt => opt.setName('الهدف').setDescription('الهدف').setRequired(true)),
   new SlashCommandBuilder().setName('اختراق').setDescription('خاص للهكر: محاولة سرقة إلكترونية من لاعب آخر').addUserOption(opt => opt.setName('الهدف').setDescription('الهدف').setRequired(true)),
@@ -251,7 +265,7 @@ const commands = [
     .setName('سلوت')
     .setDescription('ماكينة السلوت الكازينو')
     .addIntegerOption(opt => opt.setName('المبلغ').setDescription('المبلغ').setRequired(true)),
-  new SlashCommandBuilder().setName('كفالة').setDescription('دفع كفالة الخروج من السجن'),
+  new SlashCommandBuilder().setName('كفالة').setDescription('دفع كفالة الخروج من السجن (5000 عملة)'),
   new SlashCommandBuilder()
     .setName('إنشاء_عصابة')
     .setDescription('تأسيس عصابة جديدة (5000 عملة)')
@@ -272,7 +286,7 @@ client.once(Events.ClientReady, async () => {
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   try {
     await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-    console.log('✅ تم تسجيل كافة الأوامر والفعاليات الجديدة بنجاح!');
+    console.log('✅ تم تسجيل كافة الأوامر والفعاليات والأزرار الشاملة بنجاح!');
   } catch (error) {
     console.error('❌ خطأ في تحميل الأوامر:', error);
   }
@@ -288,7 +302,9 @@ function initUser(data, userId) {
       level: 1,
       createdAt: new Date().toISOString(),
       dailyLast: null,
+      boxLast: 0,
       inventory: { knife: 0, pistol: 0, smg: 0, armor: 0, car: 0 },
+      upgrades: { silencer: false, thermal: false },
       job: null,
       gang: null,
       jailUntil: 0,
@@ -302,6 +318,8 @@ function initUser(data, userId) {
   if (u.xp === undefined) u.xp = 0;
   if (u.level === undefined) u.level = 1;
   if (!u.inventory) u.inventory = { knife: 0, pistol: 0, smg: 0, armor: 0, car: 0 };
+  if (!u.upgrades) u.upgrades = { silencer: false, thermal: false };
+  if (u.boxLast === undefined) u.boxLast = 0;
   if (u.lastInvest === undefined) u.lastInvest = 0;
 }
 
@@ -315,7 +333,7 @@ function addXp(userData, amount) {
   return false;
 }
 
-// === 6. معالجة التفاعلات وأزرار المهن ===
+// === 6. معالجة التفاعلات والأزرار الشاملة ===
 client.on(Events.InteractionCreate, async interaction => {
   const data = await readData();
 
@@ -420,9 +438,12 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     if (interaction.customId === 'main_btn_market') {
-      const embed = new EmbedBuilder().setColor('#e74c3c').setTitle('🏴‍☠️ السوق السوداء').setDescription('استخدم أمر `/شراء [القطعة]` لشراء المعدات.');
+      const embed = new EmbedBuilder().setColor('#e74c3c').setTitle('🏴‍☠️ السوق السوداء والترقيات').setDescription('استخدم الأوامر لشراء الأسلحة والتعديلات.');
       for (const [key, item] of Object.entries(WEAPONS)) {
         embed.addFields({ name: `${item.name} — ${item.price.toLocaleString()} عملة`, value: `${item.desc}\n*(الأمر: \`/شراء ${key}\`)*` });
+      }
+      for (const [key, item] of Object.entries(UPGRADES)) {
+        embed.addFields({ name: `🛠️ ${item.name} — ${item.price.toLocaleString()} عملة`, value: `${item.desc}\n*(الأمر: \`/ترقية ${key}\`)*` });
       }
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
@@ -439,7 +460,7 @@ client.on(Events.InteractionCreate, async interaction => {
       const embed = new EmbedBuilder()
         .setColor('#c0392b')
         .setTitle('🚔 قائمة المحتجزين في السجن المركزي')
-        .setDescription(jailList || 'السجن خالي تماماً من المساجين حالياً! 🕊️\n\n*(يمكن للمسجون تقليص عقوبته عبر الأمر `/عمل_شاق`)*');
+        .setDescription(jailList || 'السجن خالي تماماً من المساجين حالياً! 🕊️\n\n*(يمكنك استخدام `/عمل_شاق` أو `/تهريب` أو `/كفالة`)*');
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
@@ -463,7 +484,7 @@ client.on(Events.InteractionCreate, async interaction => {
         const ownerText = t.owner ? `تسيطر عليها: **${t.owner}**` : 'حرة / غير محتلة 🔓';
         text += `• **${t.name}** — ${ownerText} (الأرباح: ${t.tax.toLocaleString()} عملة)\n`;
       }
-      const embed = new EmbedBuilder().setColor('#e67e22').setTitle('🗺️ خارطة نفوذ المناطق').setDescription(text + '\n*(استخدم الأمر `/احتلال [المنطقة]` للسيطرة)*');
+      const embed = new EmbedBuilder().setColor('#e67e22').setTitle('🗺️ خارطة نفوذ المناطق والسطو').setDescription(text + '\n*(استخدم `/احتلال` أو `/سطو_بنك`)*');
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
@@ -496,14 +517,14 @@ client.on(Events.InteractionCreate, async interaction => {
     case 'قائمة': {
       const embed = new EmbedBuilder()
         .setColor('#e74c3c')
-        .setTitle('🏛️ المركز الرئيسي واللوحة التفاعلية لعالم العصابات')
-        .setDescription('استخدم الأزرار التفاعلية أدناه للتحكم المباشر واختيار المهنة: 🔥');
+        .setTitle('🏛️ المركز الرئيسي واللوحة التفاعلية الشاملة لعالم العصابات')
+        .setDescription('استخدم الأزرار أدناه للتحكم بجميع الأنظمة، الألعاب، السجن، والمهن: 🔥');
 
       const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('main_btn_account').setLabel('💳 حسابي').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('main_btn_jobs').setLabel('🎭 المهن الإجرامية').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('main_btn_jobs').setLabel('🎭 المهن').setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId('main_btn_gang').setLabel('🏴‍☠️ عصابتي').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('main_btn_market').setLabel('🛒 السوق السوداء').setStyle(ButtonStyle.Success)
+        new ButtonBuilder().setCustomId('main_btn_market').setLabel('🛒 السوق').setStyle(ButtonStyle.Success)
       );
 
       const row2 = new ActionRowBuilder().addComponents(
@@ -521,7 +542,82 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.editReply({ content: '✅ تم تفعيل حسابك وحفظ بياناتك سحابياً بنجاح!' });
     }
 
-    // --- أوامر المهن التفاعلية الجديدة ---
+    // --- الصندوق اليومي (فكرة 3) ---
+    case 'صندوق_يومي': {
+      const now = Date.now();
+      if (now - (userData.boxLast || 0) < 24 * 60 * 60 * 1000) {
+        return interaction.editReply({ content: '❌ لقد فتحت صندوقك اليومي بالفعل! يمكنك فتحه مرة كل 24 ساعة.' });
+      }
+
+      userData.boxLast = now;
+      const prizes = [
+        { type: 'money', val: 3000, text: '3,000 عملة نقدية 💰' },
+        { type: 'item', key: 'smg', text: 'رشاش قصير 🪖' },
+        { type: 'item', key: 'armor', text: 'درع واقي 🛡️' },
+        { type: 'item', key: 'car', text: 'سيارة هرب سريعة 🏎️' }
+      ];
+      const won = prizes[Math.floor(Math.random() * prizes.length)];
+
+      if (won.type === 'money') {
+        userData.balance += won.val;
+      } else {
+        userData.inventory[won.key] = (userData.inventory[won.key] || 0) + 1;
+      }
+      await saveData(data);
+
+      return interaction.editReply(`🎁 **فتحت الصندوق اليومي بنجاح!**\nحصلت على جائزة مميزة: **${won.text}** 🎉`);
+    }
+
+    // --- ترقية الأسلحة (فكرة 4) ---
+    case 'ترقية': {
+      const upKey = options.getString('ترقية');
+      const up = UPGRADES[upKey];
+      if (!up) return interaction.editReply({ content: '❌ ترقية غير صالحة!' });
+      if (userData.upgrades[upKey]) return interaction.editReply({ content: '❌ أنت تملك هذه الترقية بالفعل!' });
+      if (userData.balance < up.price) return interaction.editReply({ content: `❌ رصيدك لا يكفي! تحتاج إلى ${up.price.toLocaleString()} عملة.` });
+
+      userData.balance -= up.price;
+      userData.upgrades[upKey] = true;
+      await saveData(data);
+
+      return interaction.editReply(`🛠️ **تمت الترقية بنجاح!** حصلت على **${up.name}** وتم تفعيل ميزتها التكتيكية. 🔥`);
+    }
+
+    // --- الهروب الكبير من السجن (فكرة 2) ---
+    case 'تهريب': {
+      const now = Date.now();
+      if (!userData.gang || !data.gangs[userData.gang]) {
+        return interaction.editReply({ content: '❌ يجب أن تنتمي لعصابة لتنفذ عملية تهريب مسلحة من السجن!' });
+      }
+      if ((userData.inventory.smg || 0) <= 0) {
+        return interaction.editReply({ content: '❌ تحتاج إلى رشاش (`smg`) لتنفيذ عملية الهجوم على السجن!' });
+      }
+
+      let gangJailedMembers = [];
+      for (const [id, u] of Object.entries(data.users || {})) {
+        if (u.gang === userData.gang && (u.jailUntil || 0) > now) {
+          gangJailedMembers.push(id);
+        }
+      }
+
+      if (gangJailedMembers.length === 0) {
+        return interaction.editReply({ content: '❌ لا يوجد أي عضو مسجون من عصابتك حالياً ليتم تهريبه!' });
+      }
+
+      if (Math.random() < 0.60) {
+        gangJailedMembers.forEach(id => {
+          data.users[id].jailUntil = 0;
+        });
+        await saveData(data);
+        return interaction.editReply(`🥷💥 **عملية تهريب بطولية ناجحة!** هاجمت العصابة السجن برشاشات ثقيلة وحررت جميع الأعضاء المسجونين دفعة واحدة! 🔥`);
+      } else {
+        userData.jailUntil = now + (15 * 60 * 1000);
+        await saveData(data);
+        return interaction.editReply(`🚨 **فشلت عملية التهريب!** تصدت قوات الأمن للهجوم واعتقلتك وسجنتك لمدة **15 دقيقة**! 🚔`);
+      }
+    }
+
+    // --- أوامر المهن التفاعلية ---
     case 'تجسس': {
       if (userData.job !== 'spy') return interaction.editReply({ content: '❌ هذا الأمر مخصص حصرياً لمهنة **🕵️ الجاسوس**!' });
       const targetUser = options.getUser('الهدف');
@@ -574,7 +670,6 @@ client.on(Events.InteractionCreate, async interaction => {
       const now = Date.now();
       if ((targetData.jailUntil || 0) <= now) return interaction.editReply({ content: '❌ هذا الشخص ليس مسجوناً!' });
 
-      // تخفيض السجن للنصف
       targetData.jailUntil = now + Math.floor((targetData.jailUntil - now) / 2);
       await saveData(data);
 
@@ -596,7 +691,7 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.editReply(`🏭 **استثمار ناجح!** جنى العراب أرباحاً تجارية بقيمة **${profit.toLocaleString()}** عملة إلى رصيدك! 💰`);
     }
 
-    // --- ألعاب الكازينو الجديدة (روليت وسباق) ---
+    // --- ألعاب الكازينو (روليت وسباق) ---
     case 'روليت': {
       const bet = options.getInteger('المبلغ');
       const colorChoice = options.getString('اللون');
@@ -642,7 +737,7 @@ client.on(Events.InteractionCreate, async interaction => {
       }
     }
 
-    // --- فعالية السطو الكبير على البنك ---
+    // --- سطو البنك ---
     case 'سطو_بنك': {
       const now = Date.now();
       if ((userData.jailUntil || 0) > now) return interaction.editReply({ content: '❌ أنت مسجون ولا يمكنك المشاركة في سطو البنك!' });
@@ -651,6 +746,7 @@ client.on(Events.InteractionCreate, async interaction => {
       if (userData.inventory.smg > 0) chance += 0.20;
       if (userData.inventory.car > 0) chance += 0.15;
       if (userData.job === 'demo') chance += 0.20;
+      if (userData.upgrades.thermal) chance += 0.15;
 
       if (Math.random() < chance) {
         const loot = Math.floor(Math.random() * 5000) + 3000;
@@ -718,7 +814,8 @@ client.on(Events.InteractionCreate, async interaction => {
       initUser(data, targetUser.id);
       const targetData = data.users[targetUser.id];
 
-      const lootRate = userData.job === 'hitman' ? 0.35 : 0.25;
+      let lootRate = userData.job === 'hitman' ? 0.35 : 0.25;
+      if (userData.upgrades.thermal) lootRate += 0.10;
       const loot = Math.floor(targetData.balance * lootRate);
 
       targetData.balance -= loot;
@@ -787,6 +884,7 @@ client.on(Events.InteractionCreate, async interaction => {
       if (userData.inventory.pistol > 0) kidnapChance += 0.15;
       if (userData.inventory.car > 0) kidnapChance += 0.15;
       if (userData.job === 'driver') kidnapChance += 0.20;
+      if (userData.upgrades.silencer) kidnapChance += 0.10;
 
       if (Math.random() < kidnapChance) {
         targetData.kidnappedBy = user.id;
@@ -802,7 +900,7 @@ client.on(Events.InteractionCreate, async interaction => {
       const now = Date.now();
       if ((userData.jailUntil || 0) <= now) return interaction.editReply({ content: '❌ أنت لست مسجوناً!' });
 
-      const bailCost = userData.job === 'lawyer' ? 500 : 1500;
+      const bailCost = userData.job === 'lawyer' ? 2500 : 5000;
       if (userData.balance < bailCost) return interaction.editReply({ content: `❌ رصيدك لا يكفي للكفالة (${bailCost.toLocaleString()} عملة)!` });
 
       userData.balance -= bailCost;
@@ -823,6 +921,7 @@ client.on(Events.InteractionCreate, async interaction => {
       if (userData.inventory.smg > 0) captureChance += 0.25;
       if (userData.inventory.car > 0) captureChance += 0.15;
       if (userData.job === 'hitman') captureChance += 0.20;
+      if (userData.upgrades.thermal) captureChance += 0.15;
 
       if (Math.random() < captureChance) {
         territory.owner = userData.gang;
@@ -1018,6 +1117,7 @@ client.on(Events.InteractionCreate, async interaction => {
       if (userData.inventory.pistol > 0) baseChance += 0.15;
       if (userData.inventory.smg > 0) baseChance += 0.25;
       if (userData.inventory.car > 0) baseChance += 0.10;
+      if (userData.upgrades.silencer) baseChance += 0.10;
 
       if (Math.random() < baseChance) {
         const loot = Math.floor(Math.random() * 800) + 200 + (userData.level * 50);
@@ -1048,9 +1148,12 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     case 'سوق_سوداء': {
-      const embed = new EmbedBuilder().setColor('#e74c3c').setTitle('🏴‍☠️ السوق السوداء').setDescription('استخدم أمر `/شراء [القطعة]` لشراء المعدات.');
+      const embed = new EmbedBuilder().setColor('#e74c3c').setTitle('🏴‍☠️ السوق السوداء والترقيات').setDescription('استخدم الأوامر لشراء الأسلحة والتعديلات.');
       for (const [key, item] of Object.entries(WEAPONS)) {
         embed.addFields({ name: `${item.name} — ${item.price.toLocaleString()} عملة`, value: `${item.desc}\n*(الأمر: \`/شراء ${key}\`)*` });
+      }
+      for (const [key, item] of Object.entries(UPGRADES)) {
+        embed.addFields({ name: `🛠️ ${item.name} — ${item.price.toLocaleString()} عملة`, value: `${item.desc}\n*(الأمر: \`/ترقية ${key}\`)*` });
       }
       return interaction.editReply({ embeds: [embed] });
     }
