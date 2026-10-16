@@ -257,17 +257,10 @@ function initUser(data, userId) {
   if (!u.inventory) u.inventory = { knife: 0, pistol: 0, smg: 0, armor: 0, car: 0 };
 }
 
-function getUserTitle(userData, totalWealth, bountyAmount) {
-  if (bountyAmount >= 20000) return '🚨 عدو الشعب رقم 1 (Most Wanted)';
-  if (totalWealth >= 500000) return '👑 العراب (Godfather)';
-  return '📌 مجرم مبتدئ';
-}
-
-// === 6. معالجة التفاعلات (الأزرار، القوائم، والمودال) ===
+// === 6. معالجة التفاعلات والأوامر ===
 client.on(Events.InteractionCreate, async interaction => {
   const data = await readData();
 
-  // A. معالجة القوائم المنسدلة
   if (interaction.isStringSelectMenu()) {
     const userId = interaction.user.id;
     initUser(data, userId);
@@ -288,7 +281,6 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
-  // B. معالجة المدخلات (Modals)
   if (interaction.isModalSubmit()) {
     const userId = interaction.user.id;
     initUser(data, userId);
@@ -322,7 +314,6 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
-  // C. معالجة الأزرار التفاعلية
   if (interaction.isButton()) {
     const userId = interaction.user.id;
     initUser(data, userId);
@@ -380,7 +371,7 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     if (interaction.customId === 'main_btn_gang') {
-      if (!userData.gang || !data.gangs[userData.gang]) return interaction.reply({ content: '❌ أنت لست عضواً في أي عصابة! أنشئ عصابة عبر `/إنشاء_عصابة`.', ephemeral: true });
+      if (!userData.gang || !data.gangs[userData.gang]) return interaction.reply({ content: '❌ أنت لست عضواً في أي عصابة!', ephemeral: true });
       const g = data.gangs[userData.gang];
       const embed = new EmbedBuilder().setColor('#e67e22').setTitle(`🛡️ تفاصيل عصابة: ${userData.gang}`).addFields(
         { name: '👑 الزعيم', value: `<@${g.leader}>`, inline: true },
@@ -390,7 +381,7 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     if (interaction.customId === 'main_btn_jail') {
-      return interaction.reply({ content: '🚔 السجن المركزي نشط. استخدم الأمر `/السجن` أو الكفالة.', ephemeral: true });
+      return interaction.reply({ content: '🚔 السجن المركزي نشط. استخدم الأمر `/السجن`.', ephemeral: true });
     }
 
     if (interaction.customId === 'main_btn_casino') {
@@ -436,7 +427,7 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
-  // D. معالجة الأوامر المباشرة (Slash Commands) بشكل ثانوي وكامل
+  // D. معالجة الأوامر المباشرة (Slash Commands)
   if (!interaction.isChatInputCommand()) return;
   const { commandName, user, options } = interaction;
 
@@ -510,10 +501,10 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     case 'إنشاء_عصابة': {
-      const gangName = options.getString('اسم العصابة');
+      const gangName = options.getString('الاسم');
       if (userData.gang) return interaction.editReply({ content: '❌ أنت تنتمي لعصابة بالفعل!' });
-      if (userData.balance < 5000) return.editReply({ content: '❌ تحتاج إلى 5,000 عملة لإنشاء عصابة!' });
-      if (data.gangs[gangName]) return.editReply({ content: '❌ اسم العصابة مستخدم مسبقاً!' });
+      if (userData.balance < 5000) return interaction.editReply({ content: '❌ تحتاج إلى 5,000 عملة لإنشاء عصابة!' });
+      if (data.gangs[gangName]) return interaction.editReply({ content: '❌ اسم العصابة مستخدم مسبقاً!' });
 
       userData.balance -= 5000;
       userData.gang = gangName;
