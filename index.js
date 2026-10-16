@@ -154,7 +154,7 @@ const JOBS = {
   hitman: { name: '🪖 المسلح العنيف', desc: 'قوة مضاعفة في الاغتيالات والنزاعات.' },
   medic: { name: '🩺 طبيب السوق السوداء', desc: 'يساعد في تقليص مدة السجن.' },
   lawyer: { name: '⚖️ المحامي الفاسد', desc: 'يخفض الكفالة إلى 2,500 عملة بدلاً من 5,000.' },
-  cop: { name: '👮 شرطي المدينة', desc: 'حفظ الأمن وإلقاء القبض على المجرمين وتقاضي الرواتب.' }
+  cop: { name: '👮 شرطي المدينة', desc: 'حفظ الأمن وإلقاء القبض على المجرمين وتقاضي الرواتب (ممنوع لأعضاء العصابات).' }
 };
 
 const client = new Client({
@@ -295,6 +295,12 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (interaction.customId === 'select_job_menu') {
       const jobKey = interaction.values[0];
+      
+      // منع رجل العصابة من تولي مهنة الشرطة
+      if (jobKey === 'cop' && userData.gang) {
+        return interaction.reply({ content: '❌ **لا يمكنك الانضمام لمهنة الشرطة لأنك عضو في عصابة إجرامية!** يجب عليك مغادرة العصابة أولاً.', ephemeral: true });
+      }
+
       userData.job = jobKey;
       if (jobKey === 'cop' && !data.policeForce.includes(userId)) data.policeForce.push(userId);
       await saveData(data);
@@ -323,10 +329,16 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     if (interaction.customId === 'modal_bail_member') {
-      const targetId = interaction.fields.getTextInputValue('bail_target_id').trim();
+      const targetUser = interaction.fields.getMentionable('bail_target_mention');
+      if (!targetUser) {
+        return interaction.reply({ content: '❌ يرجى منشن العضو المسجون بشكل صحيح داخل الحقل!', ephemeral: true });
+      }
+      const targetId = targetUser.id;
+      initUser(data, targetId);
       const now = Date.now();
-      if (!data.users[targetId] || (data.users[targetId].jailUntil || 0) <= now) {
-        return interaction.reply({ content: '❌ هذا العضو ليس مسجوناً حالياً!', ephemeral: true });
+
+      if ((data.users[targetId].jailUntil || 0) <= now) {
+        return interaction.reply({ content: `❌ العضو <@${targetId}> ليس مسجوناً حالياً!`, ephemeral: true });
       }
       const cost = 5000;
       if (userData.balance < cost) {
@@ -335,7 +347,7 @@ client.on(Events.InteractionCreate, async interaction => {
       userData.balance -= cost;
       data.users[targetId].jailUntil = 0;
       await saveData(data);
-      return interaction.reply({ content: `🔓🤝 **تم دفع الكفالة عن <@${targetId}> بنجاح وتم إطلاق سراحه من السجن!**` });
+      return interaction.reply({ content: `🔓🤝 **تم دفع الكفالة عن العضو <@${targetId}> بنجاح وتم إطلاق سراحه من السجن!**` });
     }
 
     if (interaction.customId === 'modal_wash_money') {
@@ -463,7 +475,7 @@ client.on(Events.InteractionCreate, async interaction => {
       const embed = new EmbedBuilder().setColor('#c0392b').setTitle('🚔 السجن المركزي').setDescription(jailList || 'السجن خالي تماماً حالياً! 🕊️');
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('jail_btn_bail').setLabel('🔓 دفع كفالتي (5,000)').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('jail_btn_bail_member').setLabel('🤝 دفع كفالة عن عضو').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('jail_btn_bail_member').setLabel('🤝 دفع كفالة عن عضو (منشن)').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('jail_btn_work').setLabel('⛏️ عمل شاق').setStyle(ButtonStyle.Secondary)
       );
       return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
@@ -481,7 +493,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (interaction.customId === 'jail_btn_bail_member') {
       const modal = new ModalBuilder().setCustomId('modal_bail_member').setTitle('🤝 دفع كفالة عن عضو مسجون');
-      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('bail_target_id').setLabel('Discord ID للعضو المسجون:').setStyle(TextInputStyle.Short).setRequired(true)));
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('bail_target_mention').setLabel('منشن العضو (مثال: @Username):').setStyle(TextInputStyle.Short).setRequired(true)));
       return interaction.showModal(modal);
     }
 
@@ -579,6 +591,9 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     if (interaction.customId === 'btn_join_police') {
+      if (userData.gang) {
+        return interaction.reply({ content: '❌ **لا يمكنك الانضمام للشرطة لأنك عضو في عصابة إجرامية!**', ephemeral: true });
+      }
       userData.job = 'cop';
       if (!data.policeForce.includes(userId)) data.policeForce.push(userId);
       await saveData(data);
@@ -615,6 +630,9 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     if (interaction.customId === 'btn_claim_mayor') {
+      if (data.mayor.id === userId) {
+        return interaction.reply({ content: '❌ **أنت تشغل منصب حاكم المدينة بالفعل!** لا يمكنك ترشح نفسك وأنت بالمنصب.', ephemeral: true });
+      }
       if (userData.balance < 20000) return interaction.reply({ content: '❌ تحتاج إلى 20,000 عملة للترشح لمنصب الحاكم!', ephemeral: true });
       userData.balance -= 20000;
       data.mayor.id = userId;
@@ -624,6 +642,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (interaction.customId === 'btn_overthrow_mayor') {
       if (!data.mayor.id) return interaction.reply({ content: '❌ لا يوجد حاكم للإطاحة به حالياً!', ephemeral: true });
+      if (data.mayor.id === userId) return interaction.reply({ content: '❌ لا يمكنك الإطاحة بنفسك وأنت الحاكم!', ephemeral: true });
       if (Math.random() < 0.40) {
         const stolen = data.mayor.treasury || 0;
         userData.balance += stolen;
@@ -646,7 +665,7 @@ client.on(Events.InteractionCreate, async interaction => {
         { label: '🪖 المسلح العنيف', value: 'hitman', description: 'قوة اغتيالات.' },
         { label: '🩺 طبيب السوق السوداء', value: 'medic', description: 'إسعاف وتقليص السجن.' },
         { label: '⚖️ المحامي الفاسد', value: 'lawyer', description: 'كفالة مخفضة 2,500.' },
-        { label: '👮 شرطي المدينة', value: 'cop', description: 'حفظ الأمن والقبض.' }
+        { label: '👮 شرطي المدينة', value: 'cop', description: 'حفظ الأمن (ممنوع لأعضاء العصابات).' }
       ]);
       const embed = new EmbedBuilder().setColor('#9b59b6').setTitle('🎭 مكتب اختيار المهن الإجرامية').setDescription('اختر مهنتك من القائمة أدناه للاستفادة من مميزاتها الفريدة:');
       return interaction.reply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(menu)], ephemeral: true });
@@ -773,8 +792,15 @@ client.on(Events.InteractionCreate, async interaction => {
       userData.balance -= 5000;
       userData.gang = gangName;
       data.gangs[gangName] = { name: gangName, leader: user.id, bank: 0, members: [user.id] };
+      
+      // إذا كان مؤسس العصابة يعمل كشرطي سابقاً، يتم فصله من الشرطة تلقائياً
+      if (userData.job === 'cop') {
+        userData.job = null;
+        data.policeForce = data.policeForce.filter(id => id !== user.id);
+      }
+
       await saveData(data);
-      return interaction.editReply({ content: `🎉 **تم تأسيس عصابة [ ${gangName} ] بنجاح!**` });
+      return interaction.editReply({ content: `🎉 **تم تأسيس عصابة [ ${gangName} ] بنجاح!** (وتم فصلك من سلك الشرطة تلقائياً لتأسيس العصابة).` });
     }
 
     case 'هجوم_عصابة': {
@@ -832,7 +858,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     case 'انضمام': {
       await saveData(data);
-      return interaction.editReply({ content: '✅ تم تفعيل حسابك بنجاح!' });
+      return interaction.clearApp?.() || interaction.editReply({ content: '✅ تم تفعيل حسابك بنجاح!' });
     }
 
     default:
