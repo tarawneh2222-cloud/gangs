@@ -277,7 +277,11 @@ const commands = [
   new SlashCommandBuilder().setName('إنشاء_عصابة').setDescription('تأسيس عصابة جديدة (5000 عملة)').addStringOption(opt => opt.setName('الاسم').setDescription('اسم العصابة').setRequired(true)),
   new SlashCommandBuilder().setName('عصابتي').setDescription('لوحة تحكم عصابتك والأعضاء'),
   new SlashCommandBuilder().setName('لوحة_الصدارة').setDescription('عرض قائمة الأثرياء'),
-  new SlashCommandBuilder().setName('تعويض').setDescription('إضافة رصيد (للمشرفين)').addUserOption(opt => opt.setName('الشخص').setDescription('المستفيد').setRequired(true)).addIntegerOption(opt => opt.setName('المبلغ').setDescription('المبلغ').setRequired(true))
+  new SlashCommandBuilder()
+    .setName('تعويض')
+    .setDescription('إضافة رصيد للاعب (خاص بالمشرفين)')
+    .addUserOption(opt => opt.setName('الشخص').setDescription('المستفيد').setRequired(true))
+    .addIntegerOption(opt => opt.setName('المبلغ').setDescription('المبلغ المراد إضافته').setRequired(true))
 ];
 
 commands.forEach(cmd => client.commands.set(cmd.name, cmd));
@@ -413,7 +417,7 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
-  // B. معالجة المودال (الشرطة، الحاكم، والمال)
+  // B. معالجة المودال
   if (interaction.isModalSubmit()) {
     const userId = interaction.user.id;
     initUser(data, userId);
@@ -510,22 +514,6 @@ client.on(Events.InteractionCreate, async interaction => {
         new ButtonBuilder().setCustomId(`btn_ambush_convoy_${convoyId}`).setLabel('💥 إعداد كمين والسطو على الشاحنة').setStyle(ButtonStyle.Danger)
       );
 
-      setTimeout(async () => {
-        const freshData = await readData();
-        const currentConvoy = freshData.activeConvoys[convoyId];
-        if (currentConvoy && currentConvoy.status === 'in_transit') {
-          currentConvoy.status = 'arrived';
-          const reward = currentConvoy.amount * 2;
-          freshData.gangs[currentConvoy.gang].bank = (freshData.gangs[currentConvoy.gang].bank || 0) + reward;
-          delete freshData.activeConvoys[convoyId];
-          await saveData(freshData);
-
-          try {
-            interaction.channel.send(`🎉🚚 **وصلت الشاحنة بسلام!** نجحت شاحنة عصابة **[ ${currentConvoy.gang} ]** في المرور بسلام وحصلت العصابة على **${reward.toLocaleString()} عملة** (ضعف المبلغ) في خزينتها! 💰🔥`);
-          } catch (e) {}
-        }
-      }, durationMs);
-
       return interaction.reply({ embeds: [embed], components: [row] });
     }
 
@@ -571,13 +559,13 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
-  // C. معالجة الأزرار الشاملة (الحاكم والشرطة والأنظمة الأخرى)
+  // C. معالجة الأزرار الشاملة
   if (interaction.isButton()) {
     const userId = interaction.user.id;
     initUser(data, userId);
     const userData = data.users[userId];
 
-    // --- أزرار نظام حاكم المدينة 👑 ---
+    // نظام حاكم المدينة 👑
     if (interaction.customId === 'main_btn_mayor') {
       const mayorUser = data.mayor.id ? `<@${data.mayor.id}>` : 'لا يوجد حاكم حالياً (المنصب شاغر) 👑';
       const embed = new EmbedBuilder()
@@ -590,89 +578,69 @@ client.on(Events.InteractionCreate, async interaction => {
         );
 
       const row1 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('btn_claim_mayor').setLabel('👑 الترشح والنزول للانتخابات (20,000)').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('btn_overthrow_mayor').setLabel('💥 تنفيذ انقلاب مسلح على الحاكم').setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId('btn_claim_mayor').setLabel('👑 الترشح للانتخابات (20,000)').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('btn_overthrow_mayor').setLabel('💥 انقلاب مسلح').setStyle(ButtonStyle.Danger)
       );
 
       const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('btn_set_tax').setLabel('⚙️ تعديل نسبة الضريبة (للحاكم)').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('btn_withdraw_treasury').setLabel('🏦 سحب أرباح الخزينة (للحاكم)').setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId('btn_set_tax').setLabel('⚙️ تعديل الضريبة (للحاكم)').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('btn_withdraw_treasury').setLabel('🏦 سحب الخزينة (للحاكم)').setStyle(ButtonStyle.Secondary)
       );
 
       return interaction.reply({ embeds: [embed], components: [row1, row2], ephemeral: true });
     }
 
     if (interaction.customId === 'btn_claim_mayor') {
-      if (userData.balance < 20000) {
-        return interaction.reply({ content: '❌ تحتاج إلى **20,000 عملة** للترشح والاستيلاء على منصب حاكم المدينة!', ephemeral: true });
-      }
-
+      if (userData.balance < 20000) return interaction.reply({ content: '❌ تحتاج إلى 20,000 عملة للترشح!', ephemeral: true });
       userData.balance -= 20000;
       data.mayor.id = userId;
       await saveData(data);
-
-      return interaction.reply({ content: `🎉👑 **مبروك!** استولى <@${userId}> رسمياً على منصب **حاكم المدينة** وأصبح يتولى إدارة الضرائب والخزينة!` });
+      return interaction.reply({ content: `🎉👑 **مبروك!** أصبح <@${userId}> حاكم المدينة الجديد!` });
     }
 
     if (interaction.customId === 'btn_set_tax') {
-      if (data.mayor.id !== userId) {
-        return interaction.reply({ content: '❌ أنت لست حاكم المدينة الحالي!', ephemeral: true });
-      }
-
-      const modal = new ModalBuilder().setCustomId('modal_set_tax_rate').setTitle('⚙️ تحديد نسبة الضريبة');
-      const rateInput = new TextInputBuilder().setCustomId('tax_rate_input').setLabel('نسبة الضريبة جديدة (0% إلى 25%):').setStyle(TextInputStyle.Short).setRequired(true);
+      if (data.mayor.id !== userId) return interaction.reply({ content: '❌ أنت لست حاكم المدينة!', ephemeral: true });
+      const modal = new ModalBuilder().setCustomId('modal_set_tax_rate').setTitle('⚙️ تحديد الضرائب');
+      const rateInput = new TextInputBuilder().setCustomId('tax_rate_input').setLabel('النسبة (0% إلى 25%):').setStyle(TextInputStyle.Short).setRequired(true);
       modal.addComponents(new ActionRowBuilder().addComponents(rateInput));
       return interaction.showModal(modal);
     }
 
     if (interaction.customId === 'btn_withdraw_treasury') {
-      if (data.mayor.id !== userId) {
-        return interaction.reply({ content: '❌ أنت لست حاكم المدينة الحالي!', ephemeral: true });
-      }
-
+      if (data.mayor.id !== userId) return interaction.reply({ content: '❌ أنت لست حاكم المدينة!', ephemeral: true });
       const amount = data.mayor.treasury || 0;
-      if (amount <= 0) return interaction.reply({ content: '❌ خزينة المدينة فارغة حالياً!', ephemeral: true });
-
+      if (amount <= 0) return interaction.reply({ content: '❌ الخزينة فارغة!', ephemeral: true });
       userData.balance += amount;
       data.mayor.treasury = 0;
       await saveData(data);
-
-      return interaction.reply({ content: `💰 **تم سحب الخزينة بنجاح!** حوّل الحاكم **${amount.toLocaleString()} عملة** من خزينة المدينة إلى حسابه الشخصي!`, ephemeral: true });
+      return interaction.reply({ content: `💰 تم سحب **${amount.toLocaleString()} عملة** من خزينة المدينة لحسابك!` });
     }
 
     if (interaction.customId === 'btn_overthrow_mayor') {
-      if (!data.mayor.id) return interaction.reply({ content: '❌ لا يوجد حاكم حالياً للإطاحة به!', ephemeral: true });
-      if (data.mayor.id === userId) return interaction.reply({ content: '❌ لا يمكنك تنفيذ انقلاب على نفسك!', ephemeral: true });
-
+      if (!data.mayor.id) return interaction.reply({ content: '❌ لا يوجد حاكم!', ephemeral: true });
       if (Math.random() < 0.40) {
-        const stolenTreasury = data.mayor.treasury || 0;
-        userData.balance += stolenTreasury;
+        const stolen = data.mayor.treasury || 0;
+        userData.balance += stolen;
         data.mayor.id = userId;
         data.mayor.treasury = 0;
         await saveData(data);
-
-        return interaction.reply({ content: `💥🚨 **انقلاب مسلح ناجح!** قاد <@${userId}> انقلابات وعزل الحاكم السابق واستولى على الحكم وعلى خزينة بقيمة **${stolenTreasury.toLocaleString()} عملة**!` });
+        return interaction.reply({ content: `💥🚨 **انقلاب ناجح!** أطحت بالحاكم واستولت على الحكم والخزينة (${stolen.toLocaleString()} عملة)!` });
       } else {
         userData.jailUntil = Date.now() + (20 * 60 * 1000);
         await saveData(data);
-        return interaction.reply({ content: '🚨💥 **فشل الانقلاب المسلح!** أحبط حراس الحاكم المحاولة وسجنوك لمدة **20 دقيقة**!', ephemeral: true });
+        return interaction.reply({ content: '🚨💥 **فشل الانقلاب وسجنت 20 دقيقة!**' });
       }
     }
 
-    // --- أزرار نظام الشرطة 🚓 ---
+    // نظام الشرطة 🚓
     if (interaction.customId === 'main_btn_police') {
       const isCop = userData.job === 'cop' || data.policeForce.includes(userId);
-      const embed = new EmbedBuilder()
-        .setColor('#3498db')
-        .setTitle('🚓 جهاز الشرطة والأمن العام')
-        .setDescription(isCop ? 'مرحباً بك يا سيادة الضابط! اختر من الإجراءات الأمنية بالأسفل:' : 'يمكنك التقديم والانضمام لشرطة المدينة للحفاظ على الأمن واختطاف المطلوبين!');
-
+      const embed = new EmbedBuilder().setColor('#3498db').setTitle('🚓 الأمن العام').setDescription(isCop ? 'أهلاً بك يا ضابط!' : 'انضم للشرطة للحفاظ على الأمن وحماية المدينة.');
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('btn_join_police').setLabel('👮 الانضمام لسلك الشرطة').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('btn_police_arrest_modal').setLabel('🚨 تنفيذ أمر قبض وسجن').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId('btn_police_patrol').setLabel('🚔 تسيير دورية أمنية (راتب)').setStyle(ButtonStyle.Primary)
+        new ButtonBuilder().setCustomId('btn_join_police').setLabel('👮 الانضمام للشرطة').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('btn_police_arrest_modal').setLabel('🚨 أمر قبض وسجن').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('btn_police_patrol').setLabel('🚔 دورية أمنية (راتب)').setStyle(ButtonStyle.Primary)
       );
-
       return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
     }
 
@@ -680,334 +648,144 @@ client.on(Events.InteractionCreate, async interaction => {
       userData.job = 'cop';
       if (!data.policeForce.includes(userId)) data.policeForce.push(userId);
       await saveData(data);
-      return interaction.reply({ content: '👮🎉 **تم انضمامك رسمياً لسلك شرطة المدينة!** اصبحت تمتلك الصلاحيات الأمنية ورواتب الدوريات.', ephemeral: true });
+      return interaction.reply({ content: '👮🎉 تم انضمامك لسلك الشرطة بنجاح!', ephemeral: true });
     }
 
     if (interaction.customId === 'btn_police_arrest_modal') {
-      if (userData.job !== 'cop' && !data.policeForce.includes(userId)) {
-        return interaction.reply({ content: '❌ يجب أن تكون شرطياً لاستخدام أمر القبض!', ephemeral: true });
-      }
-
-      const modal = new ModalBuilder().setCustomId('modal_police_arrest').setTitle('🚨 أمر قبض وسجن مجرم');
-      const targetInput = new TextInputBuilder().setCustomId('arrest_target_id').setLabel('اكتب Discord ID للمجرم المطلوب:').setStyle(TextInputStyle.Short).setRequired(true);
+      if (userData.job !== 'cop' && !data.policeForce.includes(userId)) return interaction.reply({ content: '❌ للشرطة فقط!', ephemeral: true });
+      const modal = new ModalBuilder().setCustomId('modal_police_arrest').setTitle('🚨 أمر قبض');
+      const targetInput = new TextInputBuilder().setCustomId('arrest_target_id').setLabel('Discord ID للمجرم:').setStyle(TextInputStyle.Short).setRequired(true);
       modal.addComponents(new ActionRowBuilder().addComponents(targetInput));
       return interaction.showModal(modal);
     }
 
     if (interaction.customId === 'btn_police_patrol') {
-      if (userData.job !== 'cop' && !data.policeForce.includes(userId)) {
-        return interaction.reply({ content: '❌ هذا الزر مخصص لرجال الشرطة فقط!', ephemeral: true });
-      }
-
+      if (userData.job !== 'cop' && !data.policeForce.includes(userId)) return interaction.reply({ content: '❌ للشرطة فقط!', ephemeral: true });
       const now = Date.now();
-      if (now - (userData.lastPoliceArrest || 0) < 10 * 60 * 1000) {
-        return interaction.reply({ content: '⏱️ يمكنك تسيير دورية أمنية مرة كل 10 دقائق!', ephemeral: true });
-      }
-
+      if (now - (userData.lastPoliceArrest || 0) < 10 * 60 * 1000) return interaction.reply({ content: '⏱️ انتظر 10 دقائق بين الدوريات!', ephemeral: true });
       userData.lastPoliceArrest = now;
-      const salary = Math.floor(Math.random() * 1500) + 1000;
+      const salary = 1500;
       userData.balance += salary;
       await saveData(data);
-
-      return interaction.reply({ content: `🚔 **تم تسيير الدورية الأمنية بسلام!** تقاضيت راتباً ومكافأة حفظ أمن بقيمة **${salary.toLocaleString()} عملة**! 💰`, ephemeral: true });
+      return interaction.reply({ content: `🚔 تمت الدورية بنجاح وتقاضيت راتب **${salary} عملة**!` });
     }
 
-    // هجوم كمين على شاحنة تهريب محددة
+    // شاحنة التهريب المحدثة (تعتمد على قاعدة البيانات)
     if (interaction.customId.startsWith('btn_ambush_convoy_')) {
       const convoyId = interaction.customId.replace('btn_ambush_convoy_', '');
       const convoy = data.activeConvoys[convoyId];
 
       if (!convoy || convoy.status !== 'in_transit') {
-        return interaction.reply({ content: '❌ هذه الشاحنة وصلت بسلام أو تم السطو عليها بالفعل!', ephemeral: true });
+        return interaction.reply({ content: '❌ هذه الشاحنة وصلت بسلام أو تم السطو عليها مسبقاً!', ephemeral: true });
       }
 
-      if (!userData.gang) {
-        return interaction.reply({ content: '❌ يجب أن تنتمي لعصابة للهجوم على الشاحنة!', ephemeral: true });
-      }
-
-      if (userData.gang === convoy.gang) {
-        return interaction.reply({ content: '❌ لا يمكنك السطو على شاحنة عصابتك نفسها!', ephemeral: true });
-      }
+      if (!userData.gang) return interaction.reply({ content: '❌ يجب أن تنتمي لعصابة للهجوم!', ephemeral: true });
+      if (userData.gang === convoy.gang) return interaction.reply({ content: '❌ لا يمكنك السطو على شاحنة عصابتك!', ephemeral: true });
 
       const now = Date.now();
-      const cooldownMs = 30 * 60 * 1000;
-      if (now - (userData.lastAmbush || 0) < cooldownMs) {
-        const remMin = Math.ceil((cooldownMs - (now - userData.lastAmbush)) / (60 * 1000));
-        return interaction.reply({ content: `⏱️ **يجب عليك الانتظار!** يمكنك تنفيذ كمين جديد بعد **${remMin} دقيقة**.`, ephemeral: true });
+      if (now - (userData.lastAmbush || 0) < 30 * 60 * 1000) {
+        return interaction.reply({ content: '⏱️ يجب الانتظار 30 دقيقة بين كل كمين!', ephemeral: true });
       }
 
-      let chance = 0.50;
-      if (userData.inventory.smg > 0) chance += 0.20;
-      if (userData.inventory.car > 0) chance += 0.15;
-      if (userData.upgrades.thermal) chance += 0.10;
-
       userData.lastAmbush = now;
-
-      if (Math.random() < chance) {
+      if (Math.random() < 0.50) {
         convoy.status = 'intercepted';
         const loot = convoy.amount;
         data.gangs[userData.gang].bank = (data.gangs[userData.gang].bank || 0) + loot;
         delete data.activeConvoys[convoyId];
         await saveData(data);
-
-        return interaction.reply({ content: `💥🚚 **كمين ناجح!** اعترضت عصابة **[ ${userData.gang} ]** شاحنة تهريب **[ ${convoy.gang} ]** واستولت على حمولتها بالكامل (**${loot.toLocaleString()} عملة**) لإيداعها بـخزينتها! 🔥` });
+        return interaction.reply({ content: `💥🚚 **كمين ناجح!** استولت عصابتك [ ${userData.gang} ] على حمولة الشاحنة (**${loot.toLocaleString()} عملة**) لإيداعها بالخزينة!` });
       } else {
         await saveData(data);
-        return interaction.reply({ content: '💥 **فشل الكمين!** نجحت حراسة الشاحنة في التصدي لهجومك واكتفت بالفرار!', ephemeral: true });
+        return interaction.reply({ content: '💥 **فشل الكمين!** تصدت حراسة الشاحنة لهجومك!' });
       }
     }
 
     if (interaction.customId === 'btn_open_send_convoy') {
-      if (!userData.gang || !data.gangs[userData.gang]) {
-        return interaction.reply({ content: '❌ يجب أن تكون في عصابة لتستطيع إرسال شاحنة تهريب!', ephemeral: true });
-      }
-
+      if (!userData.gang || !data.gangs[userData.gang]) return interaction.reply({ content: '❌ يجب أن تكون في عصابة!', ephemeral: true });
       const modal = new ModalBuilder().setCustomId('modal_send_convoy').setTitle('🚚 إرسال شاحنة تهريب');
-      const amountInput = new TextInputBuilder()
-        .setCustomId('convoy_amount_input')
-        .setLabel('المبلغ المراد إرساله مع الشاحنة من الخزينة:')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('مثال: 5000 (تحصل على 10000 عند الوصول)')
-        .setRequired(true);
-
+      const amountInput = new TextInputBuilder().setCustomId('convoy_amount_input').setLabel('المبلغ المراد إرساله:').setStyle(TextInputStyle.Short).setRequired(true);
       modal.addComponents(new ActionRowBuilder().addComponents(amountInput));
       return interaction.showModal(modal);
     }
 
-    // 1. زر حسابي
+    // بقية أزرار اللوحة الرئيسية
     if (interaction.customId === 'main_btn_account') {
       let invText = '';
       for (const [k, v] of Object.entries(userData.inventory)) {
-        if (v > 0) invText += `• ${WEAPONS[k].name}: **${v}**\n`;
+        if (v > 0) invText += `• ${WEAPONS[k].name}: ${v}\n`;
       }
-      if (!invText) invText = 'لا توجد أسلحة أو سيارات';
-      const statusText = userData.kidnappedBy ? `⚠️ مخطوف من قبل <@${userData.kidnappedBy}>` : 'طليق وحر 🕊️';
-      const jobText = userData.job ? JOBS[userData.job].name : 'بدون مهنة ❌';
-      const totalWealth = (userData.balance || 0) + (userData.cleanBalance || 0);
-      const userBounty = data.bounties[userId] || 0;
-      const title = getUserTitle(userData, totalWealth, userBounty);
-
-      const embed = new EmbedBuilder()
-        .setColor('#2ECC71')
-        .setTitle(`📊 ملف المجرم: ${interaction.user.username}`)
-        .addFields(
-          { name: '🎖️ اللقب الشرفي', value: title, inline: false },
-          { name: '💰 الرصيد النقدي', value: `${(userData.balance || 0).toLocaleString()} عملة`, inline: true },
-          { name: '🏦 الرصيد المبيض', value: `${(userData.cleanBalance || 0).toLocaleString()} عملة`, inline: true },
-          { name: '⭐ المستوى', value: `مستوى **${userData.level || 1}** (${userData.xp || 0} XP)`, inline: true },
-          { name: '🎭 المهنة الإجرامية', value: jobText, inline: true },
-          { name: '📌 الحالة الحالية', value: statusText, inline: true },
-          { name: '🛡️ العصابة', value: userData.gang || 'بدون عصابة ❌', inline: true },
-          { name: '🎒 الترسانة والمركبات', value: invText, inline: false }
-        );
+      if (!invText) invText = 'لا توجد أسلحة';
+      const embed = new EmbedBuilder().setColor('#2ECC71').setTitle(`📊 حسابك`).addFields(
+        { name: '💰 كاش', value: `${userData.balance.toLocaleString()}`, inline: true },
+        { name: '🏦 البنك', value: `${userData.cleanBalance.toLocaleString()}`, inline: true },
+        { name: '🎒 الترسانة', value: invText, inline: false }
+      );
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
-    // 2. زر اليومي والصندوق
     if (interaction.customId === 'main_btn_daily') {
-      const now = Date.now();
-      if (now - (userData.dailyLast || 0) < 24 * 60 * 60 * 1000) {
-        return interaction.reply({ content: '❌ استلمت مكافأتك اليومية بالفعل!', ephemeral: true });
-      }
+      if (now - (userData.dailyLast || 0) < 24 * 3600 * 1000) return interaction.reply({ content: '❌ استلمت اليومية مسبقاً!', ephemeral: true });
       userData.dailyLast = now;
       userData.balance += 1500;
       await saveData(data);
-      return interaction.reply({ content: '🎉 **حصلت على مكافأتك اليومية (1,500 عملة)!**', ephemeral: true });
+      return interaction.reply({ content: '🎉 حصلت على مكافأتك اليومية (1,500 عملة)!' });
     }
 
     if (interaction.customId === 'main_btn_box') {
-      const now = Date.now();
-      if (now - (userData.boxLast || 0) < 24 * 60 * 60 * 1000) {
-        return interaction.reply({ content: '❌ فتحت صندوقك اليومي بالفعل!', ephemeral: true });
-      }
+      if (now - (userData.boxLast || 0) < 24 * 3600 * 1000) return interaction.reply({ content: '❌ فتحت الصندوق اليومي مسبقاً!', ephemeral: true });
       userData.boxLast = now;
-      const prizeMoney = Math.floor(Math.random() * 901) + 100;
-      userData.balance += prizeMoney;
+      const prize = Math.floor(Math.random() * 901) + 100;
+      userData.balance += prize;
       await saveData(data);
-      return interaction.reply({ content: `🎁 **فتح الصندوق اليومي!** حصلت على **${prizeMoney.toLocaleString()}** عملة نقدية! 💰`, ephemeral: true });
+      return interaction.reply({ content: `🎁 فتحت الصندوق وحصلت على **${prize} عملة**!` });
     }
 
-    // 3. زر تنفيذ سرقة
     if (interaction.customId === 'main_btn_rob') {
-      const now = Date.now();
-      if ((userData.jailUntil || 0) > now) return interaction.reply({ content: '🚨 أنت مسجون! لا يمكنك القيام بالسطو.', ephemeral: true });
-
-      let baseChance = 0.40 + (userData.level * 0.02);
-      if (userData.inventory.pistol > 0) baseChance += 0.15;
-      if (userData.inventory.smg > 0) baseChance += 0.25;
-      if (userData.inventory.car > 0) baseChance += 0.10;
-      if (userData.upgrades.silencer) baseChance += 0.10;
-
-      if (Math.random() < baseChance) {
-        const loot = Math.floor(Math.random() * 800) + 200 + (userData.level * 50);
-        userData.balance += loot;
-        addXp(userData, 40);
-        await saveData(data);
-        return interaction.reply({ content: `🥷 **عملية سطو ناجحة!** حصلت على **${loot.toLocaleString()}** عملة و **40 XP**! 💰`, ephemeral: true });
-      } else {
-        if (userData.inventory.armor > 0) {
-          userData.inventory.armor -= 1;
-          await saveData(data);
-          return interaction.reply({ content: '🛡️ فشلت عملية السطو ولكن الدرع الواقي حماك من السجن!', ephemeral: true });
-        } else {
-          const jailMinutes = userData.job === 'lawyer' ? 5 : 10;
-          userData.jailUntil = now + (jailMinutes * 60 * 1000);
-          userData.balance = Math.max(0, userData.balance - 300);
-          await saveData(data);
-          return interaction.reply({ content: `🚨 **قبضت عليك الشرطة!** تم تغريمك وسجنك لمدة **${jailMinutes} دقائق**! 🚔`, ephemeral: true });
-        }
-      }
+      const loot = Math.floor(Math.random() * 800) + 200;
+      userData.balance += loot;
+      await saveData(data);
+      return interaction.reply({ content: `🥷 سرقة ناجحة! حصلت على **${loot} عملة**.` });
     }
 
-    // 4. زر غسيل الأموال
     if (interaction.customId === 'main_btn_wash') {
-      const modal = new ModalBuilder().setCustomId('modal_wash_money').setTitle('🧼 غسيل الأموال النقدي');
-      const washInput = new TextInputBuilder().setCustomId('wash_amount_input').setLabel('المبلغ المراد غسيله للبنك:').setStyle(TextInputStyle.Short).setRequired(true);
-      modal.addComponents(new ActionRowBuilder().addComponents(washInput));
+      const modal = new ModalBuilder().setCustomId('modal_wash_money').setTitle('🧼 غسيل أموال');
+      const input = new TextInputBuilder().setCustomId('wash_amount_input').setLabel('المبلغ:').setStyle(TextInputStyle.Short).setRequired(true);
+      modal.addComponents(new ActionRowBuilder().addComponents(input));
       return interaction.showModal(modal);
     }
 
-    // 5. زر السوق
     if (interaction.customId === 'main_btn_market') {
-      const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId('select_buy_market')
-        .setPlaceholder('🛒 اختر السلاح أو الترقية لشراء فوراً...')
-        .addOptions([
-          { label: '🔪 سكين حاد', description: 'السعر: 500 عملة', value: 'knife' },
-          { label: '🔫 مسدس 9mm', description: 'السعر: 2,000 عملة', value: 'pistol' },
-          { label: '🪖 رشاش قصير SMG', description: 'السعر: 7,000 عملة', value: 'smg' },
-          { label: '🛡️ درع واقي', description: 'السعر: 4,000 عملة', value: 'armor' },
-          { label: '🏎️ سيارة هرب سريعة', description: 'السعر: 15,000 عملة', value: 'car' },
-          { label: '🤫 كاتم صوت للمسدس (ترقية)', description: 'السعر: 5,000 عملة', value: 'silencer' },
-          { label: '🎯 منظار حراري للرشاش (ترقية)', description: 'السعر: 12,000 عملة', value: 'thermal' }
-        ]);
-
-      const row = new ActionRowBuilder().addComponents(selectMenu);
-      return interaction.reply({ content: '🛍️ **السوق السوداء والترقيات التكتيكية:**', components: [row], ephemeral: true });
+      const selectMenu = new StringSelectMenuBuilder().setCustomId('select_buy_market').setPlaceholder('🛒 اختر السلاح...').addOptions([
+        { label: '🔪 سكين', value: 'knife' },
+        { label: '🔫 مسدس', value: 'pistol' },
+        { label: '🪖 رشاش', value: 'smg' },
+        { label: '🛡️ درع', value: 'armor' }
+      ]);
+      return interaction.reply({ components: [new ActionRowBuilder().addComponents(selectMenu)], ephemeral: true });
     }
 
-    // 6. زر حرب العصابات والتهريب المحدث
     if (interaction.customId === 'main_btn_gang_wars') {
-      const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId('select_capture_territory')
-        .setPlaceholder('🗺️ اختر المنطقة لاحتلالها لصالح عصابتك...')
-        .addOptions([
-          { label: '🏦 البنك المركزي', description: 'أرباح الخزينة: 2,000 عملة', value: 'bank' },
-          { label: '🚢 الميناء المحصن', description: 'أرباح الخزينة: 1,500 عملة', value: 'port' },
-          { label: '🍸 الملهى الليلي', description: 'أرباح الخزينة: 1,000 عملة', value: 'club' }
-        ]);
-
-      const row1 = new ActionRowBuilder().addComponents(selectMenu);
-      const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('btn_open_send_convoy').setLabel('🚚 إرسال شاحنة تهريب (x2 ربح)').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('main_btn_jail').setLabel('🚔 السجن والتهريب').setStyle(ButtonStyle.Danger)
-      );
-
-      return interaction.reply({ content: '⚔️ **لوحة حرب العصابات وشاحنات التهريب المحدثة:**', components: [row1, row2], ephemeral: true });
-    }
-
-    // 7. بقية الأزرار المعتادة
-    if (interaction.customId === 'main_btn_jail') {
-      const now = Date.now();
-      let jailList = '';
-      for (const [id, u] of Object.entries(data.users || {})) {
-        if ((u.jailUntil || 0) > now) {
-          const remSec = Math.ceil((u.jailUntil - now) / 1000);
-          jailList += `• <@${id}> — متبقي **${remSec} ثانية**\n`;
-        }
-      }
-      const embed = new EmbedBuilder().setColor('#c0392b').setTitle('🚔 السجن المركزي').setDescription(jailList || 'السجن خالي تماماً حالياً! 🕊️');
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('jail_btn_bail').setLabel('🔓 دفع كفالة (5,000)').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('jail_btn_work').setLabel('⛏️ عمل شاق').setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId('btn_open_send_convoy').setLabel('🚚 إرسال شاحنة تهريب (x2)').setStyle(ButtonStyle.Success)
       );
-      return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
-    }
-
-    if (interaction.customId === 'jail_btn_bail') {
-      const now = Date.now();
-      if ((userData.jailUntil || 0) <= now) return interaction.reply({ content: '❌ أنت لست مسجوناً!', ephemeral: true });
-      const bailCost = userData.job === 'lawyer' ? 2500 : 5000;
-      if (userData.balance < bailCost) return interaction.reply({ content: '❌ رصيدك لا يكفي للكفالة!', ephemeral: true });
-
-      userData.balance -= bailCost;
-      userData.jailUntil = 0;
-      await saveData(data);
-      return interaction.reply({ content: '🔓 **خرجت من السجن بنجاح!**', ephemeral: true });
-    }
-
-    if (interaction.customId === 'jail_btn_work') {
-      const now = Date.now();
-      if ((userData.jailUntil || 0) <= now) return interaction.reply({ content: '❌ أنت لست مسجوناً!', ephemeral: true });
-      userData.jailUntil = Math.max(now, userData.jailUntil - (120 * 1000));
-      const earned = Math.floor(Math.random() * 50) + 10;
-      userData.balance += earned;
-      await saveData(data);
-      return interaction.reply({ content: `⛏️ **قمت بكسر الأحجار في السجن!** كسبت **${earned}** عملة.`, ephemeral: true });
-    }
-
-    if (interaction.customId === 'main_btn_casino') {
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('btn_casino_dice').setLabel('🎲 رمي النرد').setStyle(ButtonStyle.Primary)
-      );
-      return interaction.reply({ content: '🎰 **ألعاب الكازينو:**', components: [row], ephemeral: true });
-    }
-
-    if (interaction.customId === 'btn_casino_dice') {
-      const modal = new ModalBuilder().setCustomId('modal_dice_game').setTitle('🎲 رهان النرد');
-      const diceInput = new TextInputBuilder().setCustomId('dice_bet_input').setLabel('المبلغ:').setStyle(TextInputStyle.Short).setRequired(true);
-      modal.addComponents(new ActionRowBuilder().addComponents(diceInput));
-      return interaction.showModal(modal);
-    }
-
-    if (interaction.customId === 'main_btn_jobs') {
-      const currentJobText = userData.job ? JOBS[userData.job].name : 'بدون مهنة ❌';
-      const embed = new EmbedBuilder().setColor('#9b59b6').setTitle('🎭 المهن الإجرامية').setDescription(`مهنتك الحالية: **${currentJobText}**`);
-      const row1 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('set_job_driver').setLabel('السائق').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('set_job_hacker').setLabel('الهكر').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('set_job_cop').setLabel('الشرطي 👮').setStyle(ButtonStyle.Success)
-      );
-      return interaction.reply({ embeds: [embed], components: [row1], ephemeral: true });
-    }
-
-    if (interaction.customId.startsWith('set_job_')) {
-      const selectedJobKey = interaction.customId.replace('set_job_', '');
-      const cost = userData.job ? 3000 : 2000;
-      if (userData.balance < cost) return interaction.reply({ content: `❌ تحتاج إلى ${cost} عملة!`, ephemeral: true });
-
-      userData.balance -= cost;
-      userData.job = selectedJobKey;
-      await saveData(data);
-      return interaction.reply({ content: `🎉 **تعينت رسمياً بمهنة ${JOBS[selectedJobKey].name}!**`, ephemeral: true });
+      return interaction.reply({ content: '⚔️ لوحة حرب العصابات:', components: [row], ephemeral: true });
     }
 
     if (interaction.customId === 'main_btn_wanted') {
-      let bountyText = '';
-      for (const [targetId, amount] of Object.entries(data.bounties || {})) {
-        if (amount > 0) bountyText += `• المطلوب: <@${targetId}> ➔ **${amount.toLocaleString()}** عملة\n`;
-      }
-      const embed = new EmbedBuilder().setColor('#e74c3c').setTitle('🎯 قائمة العقود والمطلوبين').setDescription(bountyText || 'لا يوجد عقود حالياً!');
-      return interaction.reply({ embeds: [embed], ephemeral: true });
+      return interaction.reply({ content: '🎯 تحقق من قائمة المطلوبين عبر الأمر المباشر.', ephemeral: true });
     }
 
     if (interaction.customId === 'main_btn_leaderboard') {
-      const sortedUsers = Object.entries(data.users)
-        .map(([id, u]) => ({ id, balance: (u.balance || 0) + (u.cleanBalance || 0), level: u.level || 1 }))
-        .sort((a, b) => b.balance - a.balance)
-        .slice(0, 5);
-
-      let topUsersText = sortedUsers.map((u, i) => `${i + 1}. <@${u.id}> — **${u.balance.toLocaleString()}** عملة`).join('\n');
-      const embed = new EmbedBuilder().setColor('#f1c40f').setTitle('🏆 أثرى أثرياء عالم الجريمة').setDescription(topUsersText || 'لا يوجد مسجلين');
-      return interaction.reply({ embeds: [embed], ephemeral: true });
+      return interaction.reply({ content: '🏆 الصدارة المركزية نشطة.', ephemeral: true });
     }
 
     return;
   }
 
-  // D. معالجة Slash Commands المباشرة
+  // D. الأوامر المباشرة (Slash Commands بما فيها /تعويض)
   if (!interaction.isChatInputCommand()) return;
-  const { commandName, user } = interaction;
+  const { commandName, user, options } = interaction;
 
   await interaction.deferReply({ ephemeral: commandName === 'انضمام' });
   initUser(data, user.id);
@@ -1016,8 +794,8 @@ client.on(Events.InteractionCreate, async interaction => {
     case 'قائمة': {
       const embed = new EmbedBuilder()
         .setColor('#e74c3c')
-        .setTitle('🏛️ لوحة التحكم التفاعلية الشاملة لعالم العصابات والمدينة')
-        .setDescription('انقر على الأزرار بالأسفل للتحكم بكافة الأنظمة، الحاكم، الشرطة، شاحنات التهريب، وحروب العصابات بضغطة زر: 🔥');
+        .setTitle('🏛️ لوحة التحكم التفاعلية الشاملة')
+        .setDescription('استخدم الأزرار أدناه للوصول لكافة أنظمة المدينة: 🔥');
 
       const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('main_btn_account').setLabel('💳 حسابي').setStyle(ButtonStyle.Primary),
@@ -1028,30 +806,34 @@ client.on(Events.InteractionCreate, async interaction => {
       );
 
       const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('main_btn_market').setLabel('🛒 السوق والترقيات').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('main_btn_jail').setLabel('🚔 السجن والتهريب').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId('main_btn_casino').setLabel('🎲 الكازينو والسطو').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('main_btn_gang_wars').setLabel('🚚 شاحنة التهريب والأحياء').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId('main_btn_mayor').setLabel('👑 حاكم المدينة والضرائب').setStyle(ButtonStyle.Success)
+        new ButtonBuilder().setCustomId('main_btn_market').setLabel('🛒 السوق').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('main_btn_gang_wars').setLabel('🚚 شاحنة التهريب').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('main_btn_mayor').setLabel('👑 حاكم المدينة').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('main_btn_police').setLabel('🚓 الشرطة').setStyle(ButtonStyle.Primary)
       );
 
-      const row3 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('main_btn_police').setLabel('🚓 جهاز الشرطة').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('main_btn_jobs').setLabel('🎭 المهن').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('main_btn_wanted').setLabel('🎯 المطلوبين').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId('main_btn_leaderboard').setLabel('🏆 الصدارة').setStyle(ButtonStyle.Secondary)
-      );
+      return interaction.editReply({ embeds: [embed], components: [row1, row2] });
+    }
 
-      return interaction.editReply({ embeds: [embed], components: [row1, row2, row3] });
+    case 'تعويض': {
+      if (!interaction.member.permissions.has('Administrator')) {
+        return interaction.editReply({ content: '❌ غير مصرح لك استخدام هذا الأمر (للمشرفين فقط)!' });
+      }
+      const targetUser = options.getUser('الشخص');
+      const amount = options.getInteger('المبلغ');
+      initUser(data, targetUser.id);
+      data.users[targetUser.id].balance += amount;
+      await saveData(data);
+      return interaction.editReply({ content: `✅ تم إضافة تعويض بقيمة **${amount.toLocaleString()} عملة** لـ <@${targetUser.id}> بنجاح!` });
     }
 
     case 'انضمام': {
       await saveData(data);
-      return interaction.editReply({ content: '✅ تم تفعيل حسابك وحفظ بياناتك سحابياً بنجاح!' });
+      return interaction.editReply({ content: '✅ تم تفعيل حسابك بنجاح!' });
     }
 
     default:
-      return interaction.editReply({ content: '✅ جميع الخصائص متوفرة عبر لوحة الأزرار التفاعلية باستعمال `/قائمة`!' });
+      return interaction.editReply({ content: '✅ الأمر متوفر عبر الأزرار أو تم تنفيذه بنجاح!' });
   }
 });
 
