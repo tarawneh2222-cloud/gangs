@@ -390,7 +390,7 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.reply({ embeds: [embed] });
     }
 
-    case 'سرقة': {
+      case 'سرقة': {
       const now = Date.now();
       if ((userData.jailUntil || 0) > now) {
         const remMinutes = Math.ceil((userData.jailUntil - now) / (1000 * 60));
@@ -415,15 +415,18 @@ client.on(Events.InteractionCreate, async interaction => {
           saveData(data);
           return interaction.reply(`🛡️ **فشلت عملية السطو وتدخلت الشرطة!** لكن **الدرع الواقي** الخاص بك امتص الهجوم وأنقذك من السجن والخراب!`);
         } else {
-          // السجن لمدة 10 دقائق
+          // السجن لمدة 10 دقائق مع حفظ البيانات فوراً
           userData.jailUntil = now + (10 * 60 * 1000);
           const fine = Math.min(userData.balance, 300);
           userData.balance -= fine;
-          saveData(data);
+          
+          saveData(data); // 
+
           return interaction.reply(`🚨 **قبضت عليك الشرطة أثناء السطو!** تم تغريمك **${fine.toLocaleString()}** عملة وإيداعك **السجن لمدة 10 دقائق**! 🚔 (استخدم \`/كفالة\` للخروج).`);
         }
       }
     }
+
 
     case 'السجن': {
       const now = Date.now();
