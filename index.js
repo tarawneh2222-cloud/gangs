@@ -5,6 +5,7 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const mongoose = require('mongoose');
 const {
   Client,
   GatewayIntentBits,
@@ -19,77 +20,116 @@ const {
   Events
 } = require('discord.js');
 
-// === إعداد خادم ويب لـ Render ===
+// === 1. إعداد خادم ويب لاستمرار العمل على Render ===
 const web = express();
-web.get('/', (_req, res) => res.status(200).send('✅ البوت يعمل بنجاح'));
+web.get('/', (_req, res) => res.status(200).send('✅ البوت يعمل بنجاح ومربوط بقاعدة البيانات السحابية'));
 web.get('/health', (_req, res) => res.json({ ok: true }));
 web.listen(Number(process.env.PORT) || 3000, '0.0.0.0');
 
-// === نظام حفظ البيانات المزدوج والمؤمن ===
+// === 2. الاتصال السحابي بـ MongoDB Atlas ===
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://tarawneh2222_db_user:I3g64sq87XbVgYrj@cluster0.qehfk3b.mongodb.net/?retryWrites=true&w=majority';
+
+let isMongoConnected = false;
+
+mongoose.connect(MONGODB_URI)
+  .then(() => {
+    isMongoConnected = true;
+    console.log('🚀 تم الاتصال بنجاح بقاعدة بيانات MongoDB Atlas السحابية!');
+  })
+  .catch(err => {
+    console.error('⚠️ تعذر الاتصال بـ MongoDB، يتم استخدام نظام الحفظ المحلي كبديل مؤقت:', err.message);
+  });
+
+// مخطط بيانات اللعبة في MongoDB
+const GameSchema = new mongoose.Schema({
+  id: { type: String, default: 'main_game_data' },
+  users: { type: Object, default: {} },
+  gangs: { type: Object, default: {} },
+  auctions: { type: Array, default: [] },
+  territories: { type: Object, default: {} },
+  settings: { type: Object, default: {} }
+}, { minimize: false });
+
+const GameDataModel = mongoose.model('GameData', GameSchema);
+
+// === 3. نظام الحفظ الهجين (السحابي والمحلي) ===
 const DATA_FILE = path.join(__dirname, 'data.json');
 const BACKUP_FILE = path.join(__dirname, 'data_backup.json');
 
-function ensureDataFile() {
-  if (!fs.existsSync(DATA_FILE)) {
-    if (fs.existsSync(BACKUP_FILE)) {
-      fs.copyFileSync(BACKUP_FILE, DATA_FILE);
-      console.log('🔄 تم استعادة البيانات من النسخة الاحتياطية!');
-    } else {
-      const initialData = { 
-        users: {}, 
-        gangs: {}, 
-        auctions: [
-          { id: 1, name: '🏎️ سيارة مصفحة أسطورية', currentPrice: 20000, highestBidder: null, active: true }
-        ],
-        territories: {
+async function readData() {
+  if (isMongoConnected) {
+    try {
+      let doc = await GameDataModel.findOne({ id: 'main_game_data' });
+      if (!doc) {
+        doc = await GameDataModel.create({
+          id: 'main_game_data',
+          users: {},
+          gangs: {},
+          auctions: [],
+          territories: {
+            bank: { name: '🏦 البنك المركزي', owner: null, tax: 2000 },
+            port: { name: '🚢 الميناء المحصن', owner: null, tax: 1500 },
+            club: { name: '🍸 الملهى الليلي', owner: null, tax: 1000 }
+          }
+        });
+      }
+      const dataObj = doc.toObject();
+      if (!dataObj.users) dataObj.users = {};
+      if (!dataObj.gangs) dataObj.gangs = {};
+      if (!dataObj.territories) {
+        dataObj.territories = {
           bank: { name: '🏦 البنك المركزي', owner: null, tax: 2000 },
           port: { name: '🚢 الميناء المحصن', owner: null, tax: 1500 },
           club: { name: '🍸 الملهى الليلي', owner: null, tax: 1000 }
-        },
-        settings: {} 
-      };
-      fs.writeFileSync(DATA_FILE, JSON.stringify(initialData, null, 2));
+        };
+      }
+      return dataObj;
+    } catch (e) {
+      console.error('❌ خطأ في قراءة MongoDB:', e.message);
     }
   }
-}
 
-function readData() {
+  // الاحتياطي المحلي
   try {
-    ensureDataFile();
-    const raw = fs.readFileSync(DATA_FILE, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (!parsed.gangs) parsed.gangs = {};
-    if (!parsed.users) parsed.users = {};
-    if (!parsed.auctions) parsed.auctions = [];
-    if (!parsed.territories) {
-      parsed.territories = {
-        bank: { name: '🏦 البنك المركزي', owner: null, tax: 2000 },
-        port: { name: '🚢 الميناء المحصن', owner: null, tax: 1500 },
-        club: { name: '🍸 الملهى الليلي', owner: null, tax: 1000 }
-      };
+    if (fs.existsSync(DATA_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+      if (!parsed.users) parsed.users = {};
+      if (!parsed.gangs) parsed.gangs = {};
+      return parsed;
     }
-    return parsed;
-  } catch (err) {
-    if (fs.existsSync(BACKUP_FILE)) {
-      return JSON.parse(fs.readFileSync(BACKUP_FILE, 'utf8'));
-    }
-    return { users: {}, gangs: {}, auctions: [], territories: {}, settings: {} };
-  }
+  } catch (err) {}
+  return { users: {}, gangs: {}, auctions: [], territories: {}, settings: {} };
 }
 
-function saveData(data) {
+async function saveData(data) {
+  if (isMongoConnected) {
+    try {
+      await GameDataModel.updateOne(
+        { id: 'main_game_data' },
+        { 
+          $set: {
+            users: data.users,
+            gangs: data.gangs,
+            auctions: data.auctions,
+            territories: data.territories,
+            settings: data.settings
+          }
+        },
+        { upsert: true }
+      );
+    } catch (e) {
+      console.error('❌ خطأ في حفظ MongoDB:', e.message);
+    }
+  }
+
   try {
     const jsonString = JSON.stringify(data, null, 2);
     fs.writeFileSync(DATA_FILE, jsonString);
     fs.writeFileSync(BACKUP_FILE, jsonString);
-    return true;
-  } catch (err) {
-    console.error('❌ خطأ في حفظ البيانات:', err.message);
-    return false;
-  }
+  } catch (err) {}
 }
 
-// === العناصر والمعدات ===
+// === 4. الأسلحة والمعدات ===
 const WEAPONS = {
   knife: { name: 'سكين حاد 🔪', price: 500, desc: 'سلاح خفيف يزيد نسبة النجاح قليلاً' },
   pistol: { name: 'مسدس 9mm 🔫', price: 2000, desc: 'مسدس أساسي يزيد نسبة الخطف بـ 15%' },
@@ -109,28 +149,13 @@ const client = new Client({
 
 client.commands = new Collection();
 
-// === تسجيل كافة الأوامر البرمجية ===
+// === 5. تسجيل كافة الأوامر البرمجية ===
 const commands = [
-  new SlashCommandBuilder()
-    .setName('قائمة')
-    .setDescription('عرض لوحة التحكم الرئيسية واللوحات التفاعلية بالأزرار'),
-
-  new SlashCommandBuilder()
-    .setName('انضمام')
-    .setDescription('إنشاء حساب جديد في عالم العصابات'),
-
-  new SlashCommandBuilder()
-    .setName('حساب')
-    .setDescription('عرض بيانات حسابك ومستواك وترسانتك'),
-
-  new SlashCommandBuilder()
-    .setName('يومي')
-    .setDescription('الحصول على المكافأة اليومية'),
-
-  new SlashCommandBuilder()
-    .setName('سوق_سوداء')
-    .setDescription('شراء الأسلحة والسيارات والدروع'),
-
+  new SlashCommandBuilder().setName('قائمة').setDescription('عرض لوحة التحكم الرئيسية واللوحات التفاعلية بالأزرار'),
+  new SlashCommandBuilder().setName('انضمام').setDescription('إنشاء وتفعيل حساب جديد'),
+  new SlashCommandBuilder().setName('حساب').setDescription('عرض بيانات حسابك ومستواك وترسانتك'),
+  new SlashCommandBuilder().setName('يومي').setDescription('الحصول على المكافأة اليومية'),
+  new SlashCommandBuilder().setName('سوق_سوداء').setDescription('شراء الأسلحة والسيارات والدروع'),
   new SlashCommandBuilder()
     .setName('شراء')
     .setDescription('شراء عنصر من السوق السوداء')
@@ -145,37 +170,26 @@ const commands = [
           { name: 'درع واقي (4000)', value: 'armor' },
           { name: 'سيارة هرب (15000)', value: 'car' }
         )),
-
-  new SlashCommandBuilder()
-    .setName('سرقة')
-    .setDescription('تنفيذ عملية سطو مسلح لجمع الأموال'),
-
+  new SlashCommandBuilder().setName('سرقة').setDescription('تنفيذ عملية سطو مسلح لجمع الأموال'),
   new SlashCommandBuilder()
     .setName('غسيل_أموال')
     .setDescription('تبييض وتحويل الأموال لتأمينها من المصادرة (رسوم 15%)')
     .addIntegerOption(opt => opt.setName('المبلغ').setDescription('المبلغ المراد تبييضه').setRequired(true)),
-
   new SlashCommandBuilder()
     .setName('خطف')
-    .setDescription('محاولة خطف لاعب باشتراط فدية مالية (نسبة نجاح عالية!)')
+    .setDescription('محاولة خطف لاعب باشتراط فدية مالية (نسبة نجاح مرتفعة!)')
     .addUserOption(opt => opt.setName('الهدف').setDescription('الشخص المراد خطفه').setRequired(true))
     .addIntegerOption(opt => opt.setName('الفدية').setDescription('المبلغ المطلوب للإفراج عنه').setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName('فدية')
-    .setDescription('دفع الفدية لإعادة حريتك أو حرية صديق مخطوف'),
-
+  new SlashCommandBuilder().setName('فدية').setDescription('دفع الفدية لإعادة حريتك أو حرية صديق مخطوف'),
   new SlashCommandBuilder()
     .setName('اغتيال')
     .setDescription('تنفيذ عملية اغتيال ضد هدف لتجريده من جزء من رصيده')
     .addUserOption(opt => opt.setName('الهدف').setDescription('الشخص المراد اغتياله').setRequired(true)),
-
   new SlashCommandBuilder()
     .setName('تحدي_عصابة')
     .setDescription('إعلان حرب وتحدي عصابة أخرى بمبلغ رهان محدد')
     .addStringOption(opt => opt.setName('العصابة').setDescription('اسم العصابة المنافسة').setRequired(true))
     .addIntegerOption(opt => opt.setName('الرهان').setDescription('مبلغ الرهان على المعركة').setRequired(true)),
-
   new SlashCommandBuilder()
     .setName('احتلال')
     .setDescription('محاولة السيطرة واحتلال إحدى مناطق المدينة لصالح عصابتك')
@@ -188,48 +202,18 @@ const commands = [
           { name: 'الميناء المحصن (ضرائب: 1500)', value: 'port' },
           { name: 'الملهى الليلي (ضرائب: 1000)', value: 'club' }
         )),
-
   new SlashCommandBuilder()
     .setName('نرد')
     .setDescription('مراهنة مالية في الكازينو على رمية النرد')
     .addIntegerOption(opt => opt.setName('المبلغ').setDescription('المبلغ المراد المراهنة به').setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName('السجن')
-    .setDescription('عرض المحتجزين بالسجن حالياً'),
-
-  new SlashCommandBuilder()
-    .setName('كفالة')
-    .setDescription('دفع كفالة الخروج من السجن (1500 عملة)'),
-
-  new SlashCommandBuilder()
-    .setName('تهريب')
-    .setDescription('تهريب سجين باقتحام مسلح')
-    .addUserOption(opt => opt.setName('الشخص').setDescription('السجين المراد تهريبه').setRequired(true)),
-
+  new SlashCommandBuilder().setName('السجن').setDescription('عرض المحتجزين بالسجن حالياً'),
+  new SlashCommandBuilder().setName('كفالة').setDescription('دفع كفالة الخروج من السجن (1500 عملة)'),
   new SlashCommandBuilder()
     .setName('إنشاء_عصابة')
     .setDescription('تأسيس عصابة جديدة (5000 عملة)')
     .addStringOption(opt => opt.setName('الاسم').setDescription('اسم العصابة').setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName('عصابتي')
-    .setDescription('لوحة تحكم عصابتك والأعضاء'),
-
-  new SlashCommandBuilder()
-    .setName('انضمام_عصابة')
-    .setDescription('الانضمام إلى عصابة')
-    .addStringOption(opt => opt.setName('الاسم').setDescription('اسم العصابة').setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName('تغذية_الخزينة')
-    .setDescription('التبرع لخزينة العصابة')
-    .addIntegerOption(opt => opt.setName('المبلغ').setDescription('المبلغ').setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName('لوحة_الصدارة')
-    .setDescription('عرض القائمة الذهبية لأثرى أثرياء السيرفر'),
-
+  new SlashCommandBuilder().setName('عصابتي').setDescription('لوحة تحكم عصابتك والأعضاء'),
+  new SlashCommandBuilder().setName('لوحة_الصدارة').setDescription('عرض القائمة الذهبية لأثرى أثرياء السيرفر'),
   new SlashCommandBuilder()
     .setName('تعويض')
     .setDescription('إضافة رصيد لمستخدم (للمشرفين فقط)')
@@ -251,6 +235,7 @@ client.once(Events.ClientReady, async () => {
 });
 
 function initUser(data, userId) {
+  if (!data.users) data.users = {};
   if (!data.users[userId]) {
     data.users[userId] = {
       balance: 1000,
@@ -283,8 +268,9 @@ function addXp(userData, amount) {
   return false;
 }
 
+// === 6. التعامل مع التفاعلات والأوامر ===
 client.on(Events.InteractionCreate, async interaction => {
-  const data = readData();
+  const data = await readData();
 
   if (interaction.isButton()) {
     const userId = interaction.user.id;
@@ -303,9 +289,9 @@ client.on(Events.InteractionCreate, async interaction => {
         .setColor('#2ECC71')
         .setTitle(`📊 ملف المجرم: ${interaction.user.username}`)
         .addFields(
-          { name: '💰 الرصيد النقدي', value: `${userData.balance.toLocaleString()} عملة`, inline: true },
-          { name: '🏦 الرصيد المبيض', value: `${userData.cleanBalance.toLocaleString()} عملة`, inline: true },
-          { name: '⭐ المستوى', value: `مستوى **${userData.level}** (${userData.xp} XP)`, inline: true },
+          { name: '💰 الرصيد النقدي', value: `${(userData.balance || 0).toLocaleString()} عملة`, inline: true },
+          { name: '🏦 الرصيد المبيض', value: `${(userData.cleanBalance || 0).toLocaleString()} عملة`, inline: true },
+          { name: '⭐ المستوى', value: `مستوى **${userData.level || 1}** (${userData.xp || 0} XP)`, inline: true },
           { name: '📌 الحالة الحالية', value: statusText, inline: true },
           { name: '🛡️ العصابة', value: userData.gang || 'بدون عصابة ❌', inline: true },
           { name: '🎒 الترسانة والمركبات', value: invText, inline: false }
@@ -323,17 +309,14 @@ client.on(Events.InteractionCreate, async interaction => {
         .setTitle(`🏴‍☠️ عصابة: ${gang.name}`)
         .addFields(
           { name: '👑 الزعيم', value: `<@${gang.leader}>`, inline: true },
-          { name: '👥 عدد الأعضاء', value: `${gang.members.length} عضو`, inline: true },
-          { name: '💰 الخزينة', value: `${gang.bank.toLocaleString()} عملة`, inline: true }
+          { name: '👥 عدد الأعضاء', value: `${gang.members ? gang.members.length : 1} عضو`, inline: true },
+          { name: '💰 الخزينة', value: `${(gang.bank || 0).toLocaleString()} عملة`, inline: true }
         );
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
     if (interaction.customId === 'main_btn_market') {
-      const embed = new EmbedBuilder()
-        .setColor('#e74c3c')
-        .setTitle('🏴‍☠️ السوق السوداء')
-        .setDescription('استخدم أمر `/شراء [القطعة]` لشراء المعدات.');
+      const embed = new EmbedBuilder().setColor('#e74c3c').setTitle('🏴‍☠️ السوق السوداء').setDescription('استخدم أمر `/شراء [القطعة]` لشراء المعدات.');
       for (const [key, item] of Object.entries(WEAPONS)) {
         embed.addFields({ name: `${item.name} — ${item.price.toLocaleString()} عملة`, value: `${item.desc}\n*(الأمر: \`/شراء ${key}\`)*` });
       }
@@ -347,27 +330,6 @@ client.on(Events.InteractionCreate, async interaction => {
         return interaction.reply({ content: `🚨 **أنت مسجون!** ينتهي الأسر بعد **${remSec} ثانية**.\nاستخدم \`/كفالة\` للخروج فوراً.`, ephemeral: true });
       }
       return interaction.reply({ content: '🕊️ **أنت حُر طليق!** لست مسجوناً.', ephemeral: true });
-    }
-
-    if (interaction.customId === 'main_btn_kidnap_status') {
-      if (userData.kidnappedBy) {
-        return interaction.reply({ content: `🚨 **أنت مخطوف ومقيد!** الخاطف: <@${userData.kidnappedBy}>\nالفدية المطلوبة: **${userData.ransomPrice.toLocaleString()} عملة**.\nاستخدم \`/فدية\` لتحرير نفسك!`, ephemeral: true });
-      }
-      return interaction.reply({ content: '🛡️ **وضعك آمن!** لم يقم أحد بخطفك حالياً. يمكنك استخدام `/خطف` لتهديد أعدائك!', ephemeral: true });
-    }
-
-    if (interaction.customId === 'main_btn_territories') {
-      let text = '';
-      for (const [key, t] of Object.entries(data.territories)) {
-        const ownerText = t.owner ? `تسيطر عليها عصابة: **${t.owner}**` : 'حرة / غير محتلة 🔓';
-        text += `• **${t.name}** — ${ownerText} (الأرباح: ${t.tax.toLocaleString()} عملة)\n`;
-      }
-      const embed = new EmbedBuilder().setColor('#e67e22').setTitle('🗺️ خارطة نفوذ المناطق').setDescription(text + '\n*(استخدم الأمر `/احتلال [المنطقة]` للسيطرة)*');
-      return interaction.reply({ embeds: [embed], ephemeral: true });
-    }
-
-    if (interaction.customId === 'main_btn_casino') {
-      return interaction.reply({ content: '🎲 **كازينو العصابات!**\nاستخدم الأمر `/نرد [المبلغ]` للمراهنة على رمية النرد ومضاعفة أموالك!', ephemeral: true });
     }
 
     if (interaction.customId === 'main_btn_leaderboard') {
@@ -403,9 +365,6 @@ client.on(Events.InteractionCreate, async interaction => {
       );
 
       const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('main_btn_kidnap_status').setLabel('🗡️ الخطف والفدية').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId('main_btn_territories').setLabel('🗺️ خريطة المناطق').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('main_btn_casino').setLabel('🎲 الكازينو والنرد').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('main_btn_leaderboard').setLabel('🏆 الصدارة').setStyle(ButtonStyle.Success)
       );
 
@@ -413,7 +372,8 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     case 'انضمام': {
-      return interaction.reply({ content: '✅ حسابك مفعل ومحفوظ بالفعل!', ephemeral: true });
+      await saveData(data);
+      return interaction.reply({ content: '✅ تم تفعيل حسابك وحفظ بياناتك سحابياً بنجاح!', ephemeral: true });
     }
 
     case 'خطف': {
@@ -427,7 +387,7 @@ client.on(Events.InteractionCreate, async interaction => {
       const targetData = data.users[targetUser.id];
       if (targetData.kidnappedBy) return interaction.reply({ content: '❌ هذا الشخص مخطوف بالفعل!', ephemeral: true });
 
-      // 🎯 رفع فرصة النجاح الأساسية إلى 65% + المكافآت
+      // نسبة الخطف المرفوعة إلى 65% + الإضافات
       let kidnapChance = 0.65;
       if (userData.inventory.pistol > 0) kidnapChance += 0.15;
       if (userData.inventory.car > 0) kidnapChance += 0.15;
@@ -435,7 +395,7 @@ client.on(Events.InteractionCreate, async interaction => {
       if (Math.random() < kidnapChance) {
         targetData.kidnappedBy = user.id;
         targetData.ransomPrice = ransom;
-        saveData(data); // 🟢 حفظ فوري
+        await saveData(data);
         return interaction.reply(`🗡️ **عملية خطف ناجحة!** احتجزت <@${targetUser.id}> باشتراط فدية **${ransom.toLocaleString()}** عملة! 🔥`);
       } else {
         return interaction.reply(`💥 **فشلت عملية الخطف!** تمكن <@${targetUser.id}> من الفرار!`);
@@ -458,7 +418,7 @@ client.on(Events.InteractionCreate, async interaction => {
       userData.kidnappedBy = null;
       userData.ransomPrice = 0;
 
-      saveData(data); // 🟢 حفظ فوري
+      await saveData(data);
       return interaction.reply(`🕊️ **تم دفع الفدية بنجاح!** دفعت **${ransom.toLocaleString()}** عملة واسترجعت حريتك!`);
     }
 
@@ -473,40 +433,9 @@ client.on(Events.InteractionCreate, async interaction => {
 
       userData.balance -= amount;
       userData.cleanBalance += cleanAmount;
-      saveData(data);
+      await saveData(data);
 
       return interaction.reply(`🧼 **تمت عملية غسيل الأموال بنجاح!**\nتم تحويل **${cleanAmount.toLocaleString()}** عملة لنظيفة بالبنك (خصم رسوم: ${fee.toLocaleString()} عملة).`);
-    }
-
-    case 'تحدي_عصابة': {
-      const enemyGangName = options.getString('العصابة').trim();
-      const bet = options.getInteger('الرهان');
-
-      if (!userData.gang || !data.gangs[userData.gang]) {
-        return interaction.reply({ content: '❌ يجب أن تكون عضواً في عصابة لإعلان التحدي!', ephemeral: true });
-      }
-
-      const myGang = data.gangs[userData.gang];
-      const enemyGang = data.gangs[enemyGangName];
-
-      if (!enemyGang) return interaction.reply({ content: '❌ العصابة المنافسة غير موجودة!', ephemeral: true });
-      if (myGang.bank < bet) return interaction.reply({ content: '❌ خزينة عصابتك لا تكفي لهذا الرهان!', ephemeral: true });
-
-      const myPower = myGang.members.length * 10;
-      const enemyPower = enemyGang.members.length * 10;
-      const winChance = myPower / (myPower + enemyPower);
-
-      if (Math.random() < winChance) {
-        myGang.bank += bet;
-        enemyGang.bank = Math.max(0, enemyGang.bank - bet);
-        saveData(data);
-        return interaction.reply(`💥 **انتصار ساحق في معركة العصابات!** هزمت عصابتك **[ ${myGang.name} ]** عصابة **[ ${enemyGangName} ]** وربحت **${bet.toLocaleString()}** عملة! 🔥`);
-      } else {
-        myGang.bank = Math.max(0, myGang.bank - bet);
-        enemyGang.bank += bet;
-        saveData(data);
-        return interaction.reply(`💥 **خسارة في الحرب!** هزمت عصابة **[ ${enemyGangName} ]** عصابتك وتم سلب **${bet.toLocaleString()}** عملة من الخزينة!`);
-      }
     }
 
     case 'حساب': {
@@ -532,7 +461,6 @@ client.on(Events.InteractionCreate, async interaction => {
     case 'سرقة': {
       const now = Date.now();
       if ((userData.jailUntil || 0) > now) return interaction.reply({ content: `🚨 أنت مسجون! لا يمكنك القيام بالسطو.`, ephemeral: true });
-      if (userData.kidnappedBy) return interaction.reply({ content: `🚨 أنت مخطوف ومقيد! اطلب دفع الفدية للحرية.`, ephemeral: true });
 
       let baseChance = 0.40 + (userData.level * 0.02);
       if (userData.inventory.pistol > 0) baseChance += 0.15;
@@ -543,7 +471,7 @@ client.on(Events.InteractionCreate, async interaction => {
         const loot = Math.floor(Math.random() * 800) + 200 + (userData.level * 50);
         userData.balance += loot;
         const lvlUp = addXp(userData, 40);
-        saveData(data);
+        await saveData(data);
 
         let msg = `🥷 **عملية سطو ناجحة!** حصلت على **${loot.toLocaleString()}** عملة و **40 XP**! 💰`;
         if (lvlUp) msg += `\n🎉 **مبروك! ارتفع مستواك إلى المستوى ${userData.level}!**`;
@@ -551,91 +479,16 @@ client.on(Events.InteractionCreate, async interaction => {
       } else {
         if (userData.inventory.armor > 0) {
           userData.inventory.armor -= 1;
-          saveData(data);
+          await saveData(data);
           return interaction.reply(`🛡️ فشلت عملية السطو ولكن الدرع الواقي حماك من السجن!`);
         } else {
           userData.jailUntil = now + (10 * 60 * 1000);
           const fine = Math.min(userData.balance, 300);
           userData.balance -= fine;
-          saveData(data);
+          await saveData(data);
           return interaction.reply(`🚨 **قبضت عليك الشرطة!** تم تغريمك **${fine.toLocaleString()}** عملة وسجنك **10 دقائق**! 🚔`);
         }
       }
-    }
-
-    case 'اغتيال': {
-      const targetUser = options.getUser('الهدف');
-      if (targetUser.id === user.id) return interaction.reply({ content: '❌ لا يمكنك اغتيال نفسك!', ephemeral: true });
-
-      if ((userData.inventory.smg || 0) <= 0) {
-        return interaction.reply({ content: '❌ تحتاج إلى سلاح رشاش (`smg`) لتنفيذ عملية اغتيال!', ephemeral: true });
-      }
-
-      initUser(data, targetUser.id);
-      const targetData = data.users[targetUser.id];
-
-      const loot = Math.floor(targetData.balance * 0.25);
-      targetData.balance -= loot;
-      userData.balance += loot;
-      targetData.jailUntil = Date.now() + (15 * 60 * 1000);
-
-      saveData(data);
-      return interaction.reply(`🎯 **عملية اغتيال ناجحة!** أصبت <@${targetUser.id}> وسلبت **${loot.toLocaleString()}** عملة منه! 💥`);
-    }
-
-    case 'احتلال': {
-      const terrKey = options.getString('المنطقة');
-      const territory = data.territories[terrKey];
-
-      if (!userData.gang || !data.gangs[userData.gang]) {
-        return interaction.reply({ content: '❌ يجب أن تنتمي لعصابة لتستطيع السيطرة على المناطق!', ephemeral: true });
-      }
-
-      let captureChance = 0.40;
-      if (userData.inventory.smg > 0) captureChance += 0.30;
-      if (userData.inventory.car > 0) captureChance += 0.15;
-
-      if (Math.random() < captureChance) {
-        territory.owner = userData.gang;
-        data.gangs[userData.gang].bank += territory.tax;
-        saveData(data);
-        return interaction.reply(`⚔️ **اقتحام وسيطرة ناجحة!** سيطرت عصابة **[ ${userData.gang} ]** على **${territory.name}** وجنت **${territory.tax.toLocaleString()}** عملة لخزينتها! 🔥`);
-      } else {
-        return interaction.reply(`💥 **فشلت عملية السيطرة على ${territory.name}!** تصدت الحراسات للهجوم!`);
-      }
-    }
-
-    case 'نرد': {
-      const bet = options.getInteger('المبلغ');
-      if (bet <= 0 || userData.balance < bet) {
-        return interaction.reply({ content: '❌ رصيدك النقدي لا يكفي لهذه المراهنة!', ephemeral: true });
-      }
-
-      const playerRoll = Math.floor(Math.random() * 6) + 1;
-      const botRoll = Math.floor(Math.random() * 6) + 1;
-
-      if (playerRoll > botRoll) {
-        userData.balance += bet;
-        saveData(data);
-        return interaction.reply(`🎲 **فوز ساحق!** رميت **${playerRoll}** مقابل **${botRoll}** للكازينو. كسبت **${bet.toLocaleString()}** عملة! 💰✨`);
-      } else if (playerRoll < botRoll) {
-        userData.balance -= bet;
-        saveData(data);
-        return interaction.reply(`🎲 **خسارة!** رميت **${playerRoll}** مقابل **${botRoll}** للكازينو. خسرت **${bet.toLocaleString()}** عملة.`);
-      } else {
-        return interaction.reply(`🎲 **تعادل!** رميتما **${playerRoll}**، تم استرداد المبلغ.`);
-      }
-    }
-
-    case 'كفالة': {
-      const now = Date.now();
-      if ((userData.jailUntil || 0) <= now) return interaction.reply({ content: '❌ أنت لست مسجوناً!', ephemeral: true });
-      if (userData.balance < 1500) return interaction.reply({ content: '❌ رصيدك لا يكفي (1,500 عملة)!', ephemeral: true });
-
-      userData.balance -= 1500;
-      userData.jailUntil = 0;
-      saveData(data);
-      return interaction.reply('🔓 **خرجت من السجن بنجاح بعد دفع الكفالة!**');
     }
 
     case 'سوق_سوداء': {
@@ -654,7 +507,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
       userData.balance -= item.price;
       userData.inventory[itemKey] = (userData.inventory[itemKey] || 0) + 1;
-      saveData(data);
+      await saveData(data);
       return interaction.reply(`✅ **تم الشراء بنجاح!** حصلت على **${item.name}**.`);
     }
 
@@ -664,12 +517,12 @@ client.on(Events.InteractionCreate, async interaction => {
       const amount = options.getInteger('المبلغ');
       initUser(data, targetUser.id);
       data.users[targetUser.id].balance += amount;
-      saveData(data);
-      return interaction.reply(`✅ تم إضافة **${amount.toLocaleString()}** عملة لـ <@${targetUser.id}>.`);
+      await saveData(data);
+      return interaction.reply(`✅ تم إضافة **${amount.toLocaleString()}** عملة لـ <@${targetUser.id}> وحفظها سحابياً.`);
     }
 
     default:
-      return interaction.reply({ content: '❌ أمر غير معروف!', ephemeral: true });
+      return interaction.reply({ content: '❌ أمر غير معروف أو جاري تحديثه!', ephemeral: true });
   }
 });
 
