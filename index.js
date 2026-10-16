@@ -140,13 +140,13 @@ const WEAPONS = {
 
 const JOBS = {
   driver: { name: '🏎️ السائق الخبير', desc: 'تزيد نسبة نجاح الخطف والفرار من الشرطة بنسبة +20% إضافية.' },
-  hacker: { name: '💻 الهكر الإجرامي', desc: 'تخفيض رسوم غسيل الأموال من 15% إلى 5% فقط.' },
+  hacker: { name: '💻 الهكر الإجرامي', desc: 'تخفيض رسوم غسيل الأموال إلى 5% وإمكانية استخدام أمر `/اختراق`.' },
   hitman: { name: '🪖 المسلح العنيف', desc: 'تزيد نسبة نجاح الاغتيال واحتلال المناطق بـ +20% وتكسب أرباح سرقة أرفع.' },
-  boss: { name: '🏭 العراب / رجل الأعمال', desc: 'ميزات استثمارية وأرباح مضاعفة عند إدارة الممتلكات والعصابات.' },
-  spy: { name: '🕵️ الجاسوس', desc: 'إمكانية كشف حسابات ومعدات الخصوم بدقة عالية.' },
-  medic: { name: '🩺 طبيب السوق السوداء', desc: 'تخفيض غرامات القبض من الشرطة بنسبة 50%.' },
+  boss: { name: '🏭 العراب / رجل الأعمال', desc: 'ميزات استثمارية عبر أمر `/استثمار` وأرباح مضاعفة.' },
+  spy: { name: '🕵️ الجاسوس', desc: 'إمكانية استخدام أمر `/تجسس` لكشف حسابات ومعدات الخصوم.' },
+  medic: { name: '🩺 طبيب السوق السوداء', desc: 'تخفيض غرامات القبض 50% وإمكانية استخدام `/إسعاف` للمسجونين.' },
   demo: { name: '💣 خبير المتفجرات', desc: 'زيادة القوة التدميرية ونسبة نجاح السرقات الكبرى.' },
-  lawyer: { name: '⚖️ المحامي الفاسد', desc: 'تخفيض قيمة الكفالة لـ 500 عملة وتقليل مدة السجن للنصف تلقائياً.' }
+  lawyer: { name: '⚖️ المحامي الفاسد', desc: 'تخفيض الكفالة لـ 500 عملة وتقليل مدة السجن للنصف تلقائياً.' }
 };
 
 const client = new Client({
@@ -160,7 +160,7 @@ const client = new Client({
 
 client.commands = new Collection();
 
-// === 5. تسجيل الأوامر البرمجية ===
+// === 5. تسجيل الأوامر البرمجية الكاملة ===
 const commands = [
   new SlashCommandBuilder().setName('قائمة').setDescription('عرض لوحة التحكم الرئيسية واللوحات التفاعلية بالأزرار'),
   new SlashCommandBuilder().setName('انضمام').setDescription('إنشاء وتفعيل حساب جديد'),
@@ -192,6 +192,21 @@ const commands = [
     .addIntegerOption(opt => opt.setName('المكافأة').setDescription('المبلغ المرصود').setRequired(true)),
   new SlashCommandBuilder().setName('المطلوبين').setDescription('عرض لائحة الأشخاص المطلوب اغتيالهم والمكافآت'),
   new SlashCommandBuilder().setName('عمل_شاق').setDescription('كسر الأحجار لتقليص مدة عقوبة السجن'),
+  // أوامر المهن التفاعلية
+  new SlashCommandBuilder().setName('تجسس').setDescription('خاص للجاسوس: كشف رصيد ومعدات لاعب آخر').addUserOption(opt => opt.setName('الهدف').setDescription('الهدف').setRequired(true)),
+  new SlashCommandBuilder().setName('اختراق').setDescription('خاص للهكر: محاولة سرقة إلكترونية من لاعب آخر').addUserOption(opt => opt.setName('الهدف').setDescription('الهدف').setRequired(true)),
+  new SlashCommandBuilder().setName('إسعاف').setDescription('خاص للطبيب: تقليص سجن زميلك').addUserOption(opt => opt.setName('الهدف').setDescription('الهدف').setRequired(true)),
+  new SlashCommandBuilder().setName('استثمار').setDescription('خاص للعراب: جني عوائد أرباح استثمارية سريعة'),
+  // الألعاب والكازينو الجديدة
+  new SlashCommandBuilder().setName('سباق').setDescription('مراهنة سباق سيارات الشوارع').addIntegerOption(opt => opt.setName('المبلغ').setDescription('المبلغ').setRequired(true)),
+  new SlashCommandBuilder().setName('روليت').setDescription('لعبة الكازينو الروليت بالألوان')
+    .addIntegerOption(opt => opt.setName('المبلغ').setDescription('المبلغ').setRequired(true))
+    .addStringOption(opt => opt.setName('اللون').setDescription('اختر اللون').setRequired(true).addChoices(
+      { name: '🔴 أحمر (مضاعفة x2)', value: 'red' },
+      { name: '⚫ أسود (مضاعفة x2)', value: 'black' },
+      { name: '🟢 أخضر (مضاعفة x14)', value: 'green' }
+    )),
+  new SlashCommandBuilder().setName('سطو_بنك').setDescription('فعالية جماعية لاقتحام البنك المركزي'),
   new SlashCommandBuilder()
     .setName('غسيل_أموال')
     .setDescription('تبييض الأموال (رسوم 15% أو 5% للهكر)')
@@ -257,7 +272,7 @@ client.once(Events.ClientReady, async () => {
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   try {
     await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-    console.log('✅ تم تسجيل كافة الأوامر والأنظمة الجديدة بنجاح!');
+    console.log('✅ تم تسجيل كافة الأوامر والفعاليات الجديدة بنجاح!');
   } catch (error) {
     console.error('❌ خطأ في تحميل الأوامر:', error);
   }
@@ -278,7 +293,8 @@ function initUser(data, userId) {
       gang: null,
       jailUntil: 0,
       kidnappedBy: null,
-      ransomPrice: 0
+      ransomPrice: 0,
+      lastInvest: 0
     };
   }
   const u = data.users[userId];
@@ -286,6 +302,7 @@ function initUser(data, userId) {
   if (u.xp === undefined) u.xp = 0;
   if (u.level === undefined) u.level = 1;
   if (!u.inventory) u.inventory = { knife: 0, pistol: 0, smg: 0, armor: 0, car: 0 };
+  if (u.lastInvest === undefined) u.lastInvest = 0;
 }
 
 function addXp(userData, amount) {
@@ -313,15 +330,15 @@ client.on(Events.InteractionCreate, async interaction => {
 
       const embed = new EmbedBuilder()
         .setColor('#9b59b6')
-        .setTitle('🎭 دليل المهن الإجرامية التخصصية والشرح الشامل')
+        .setTitle('🎭 دليل المهن الإجرامية التخصصية والأوامر الخاصة')
         .setDescription(`مهنتك الحالية: **${currentJobText}**\nرسوم الاختيار/التغيير: **${costText}**\n\n📌 **شرح الخصائص والميزات:**`)
         .addFields(
           { name: '🏎️ السائق الخبير', value: `• ${JOBS.driver.desc}`, inline: false },
-          { name: '💻 الهكر الإجرامي', value: `• ${JOBS.hacker.desc}`, inline: false },
+          { name: '💻 الهكر الإجرامي', value: `• ${JOBS.hacker.desc}\n*(أمر خاص: \`/اختراق\`)*`, inline: false },
           { name: '🪖 المسلح العنيف', value: `• ${JOBS.hitman.desc}`, inline: false },
-          { name: '🏭 العراب / رجل الأعمال', value: `• ${JOBS.boss.desc}`, inline: false },
-          { name: '🕵️ الجاسوس', value: `• ${JOBS.spy.desc}`, inline: false },
-          { name: '🩺 طبيب السوق السوداء', value: `• ${JOBS.medic.desc}`, inline: false },
+          { name: '🏭 العراب / رجل الأعمال', value: `• ${JOBS.boss.desc}\n*(أمر خاص: \`/استثمار\`)*`, inline: false },
+          { name: '🕵️ الجاسوس', value: `• ${JOBS.spy.desc}\n*(أمر خاص: \`/تجسس\`)*`, inline: false },
+          { name: '🩺 طبيب السوق السوداء', value: `• ${JOBS.medic.desc}\n*(أمر خاص: \`/إسعاف\`)*`, inline: false },
           { name: '💣 خبير المتفجرات', value: `• ${JOBS.demo.desc}`, inline: false },
           { name: '⚖️ المحامي الفاسد', value: `• ${JOBS.lawyer.desc}`, inline: false }
         );
@@ -421,7 +438,7 @@ client.on(Events.InteractionCreate, async interaction => {
       }
       const embed = new EmbedBuilder()
         .setColor('#c0392b')
-        .setTitle('🚔 قائمة المحتجزين في السجن المركزى')
+        .setTitle('🚔 قائمة المحتجزين في السجن المركزي')
         .setDescription(jailList || 'السجن خالي تماماً من المساجين حالياً! 🕊️\n\n*(يمكن للمسجون تقليص عقوبته عبر الأمر `/عمل_شاق`)*');
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
@@ -451,7 +468,7 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     if (interaction.customId === 'main_btn_casino') {
-      return interaction.reply({ content: '🎲 **كازينو العصابات والألعاب!**\nالألعاب المتاحة:\n• `/نرد [المبلغ]`\n• `/عملة [المبلغ] [ملك/كتابة]`\n• `/سلوت [المبلغ]`', ephemeral: true });
+      return interaction.reply({ content: '🎲 **كازينو العصابات والألعاب الفعالة!**\n• `/نرد [المبلغ]`\n• `/عملة [المبلغ] [ملك/كتابة]`\n• `/سلوت [المبلغ]`\n• `/روليت [المبلغ] [اللون]`\n• `/سباق [المبلغ]`', ephemeral: true });
     }
 
     if (interaction.customId === 'main_btn_leaderboard') {
@@ -504,6 +521,150 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.editReply({ content: '✅ تم تفعيل حسابك وحفظ بياناتك سحابياً بنجاح!' });
     }
 
+    // --- أوامر المهن التفاعلية الجديدة ---
+    case 'تجسس': {
+      if (userData.job !== 'spy') return interaction.editReply({ content: '❌ هذا الأمر مخصص حصرياً لمهنة **🕵️ الجاسوس**!' });
+      const targetUser = options.getUser('الهدف');
+      initUser(data, targetUser.id);
+      const targetData = data.users[targetUser.id];
+
+      let targetInv = '';
+      for (const [k, v] of Object.entries(targetData.inventory)) {
+        if (v > 0) targetInv += `• ${WEAPONS[k].name}: ${v}\n`;
+      }
+      if (!targetInv) targetInv = 'لا يملك أسلحة';
+
+      const embed = new EmbedBuilder()
+        .setColor('#34495e')
+        .setTitle(`🕵️ تقرير تجسس على: ${targetUser.username}`)
+        .addFields(
+          { name: '💰 الرصيد النقدي', value: `${targetData.balance.toLocaleString()} عملة`, inline: true },
+          { name: '🏦 الرصيد المبيض', value: `${targetData.cleanBalance.toLocaleString()} عملة`, inline: true },
+          { name: '⭐ المستوى', value: `${targetData.level}`, inline: true },
+          { name: '🎒 الترسانة', value: targetInv, inline: false }
+        );
+      return interaction.editReply({ embeds: [embed] });
+    }
+
+    case 'اختراق': {
+      if (userData.job !== 'hacker') return interaction.editReply({ content: '❌ هذا الأمر مخصص حصرياً لمهنة **💻 الهكر الإجرامي**!' });
+      const targetUser = options.getUser('الهدف');
+      if (targetUser.id === user.id) return interaction.editReply({ content: '❌ لا يمكنك اختراق نفسك!' });
+      initUser(data, targetUser.id);
+      const targetData = data.users[targetUser.id];
+
+      if (targetData.balance < 500) return interaction.editReply({ content: '❌ رصيد الهدف فقير جداً لا يستحق الاختراق!' });
+
+      const stolen = Math.floor(Math.random() * 800) + 200;
+      const actualStolen = Math.min(targetData.balance, stolen);
+
+      targetData.balance -= actualStolen;
+      userData.balance += actualStolen;
+      await saveData(data);
+
+      return interaction.editReply(`💻 **اختراق ناجح!** استطاعت اختراق حساب <@${targetUser.id}> وسرقة **${actualStolen.toLocaleString()}** عملة لحسابك! ⚡`);
+    }
+
+    case 'إسعاف': {
+      if (userData.job !== 'medic') return interaction.editReply({ content: '❌ هذا الأمر مخصص حصرياً لمهنة **🩺 طبيب السوق السوداء**!' });
+      const targetUser = options.getUser('الهدف');
+      initUser(data, targetUser.id);
+      const targetData = data.users[targetUser.id];
+
+      const now = Date.now();
+      if ((targetData.jailUntil || 0) <= now) return interaction.editReply({ content: '❌ هذا الشخص ليس مسجوناً!' });
+
+      // تخفيض السجن للنصف
+      targetData.jailUntil = now + Math.floor((targetData.jailUntil - now) / 2);
+      await saveData(data);
+
+      return interaction.editReply(`🩺 **قمت بإسعاف وتخفيض عقوبة <@${targetUser.id}> في السجن للنصف!**`);
+    }
+
+    case 'استثمار': {
+      if (userData.job !== 'boss') return interaction.editReply({ content: '❌ هذا الأمر مخصص حصرياً لمهنة **🏭 العراب / رجل الأعمال**!' });
+      const now = Date.now();
+      if (now - (userData.lastInvest || 0) < 60 * 60 * 1000) {
+        return interaction.editReply({ content: '❌ يمكنك جني أرباح الاستثمار مرة كل ساعة واحدة فقط!' });
+      }
+
+      const profit = Math.floor(Math.random() * 2000) + 1000;
+      userData.balance += profit;
+      userData.lastInvest = now;
+      await saveData(data);
+
+      return interaction.editReply(`🏭 **استثمار ناجح!** جنى العراب أرباحاً تجارية بقيمة **${profit.toLocaleString()}** عملة إلى رصيدك! 💰`);
+    }
+
+    // --- ألعاب الكازينو الجديدة (روليت وسباق) ---
+    case 'روليت': {
+      const bet = options.getInteger('المبلغ');
+      const colorChoice = options.getString('اللون');
+      if (bet <= 0 || userData.balance < bet) return interaction.editReply({ content: '❌ رصيدك لا يكفي!' });
+
+      const rand = Math.random();
+      let resultColor = 'red';
+      if (rand < 0.45) resultColor = 'red';
+      else if (rand < 0.90) resultColor = 'black';
+      else resultColor = 'green';
+
+      userData.balance -= bet;
+      let win = 0;
+      if (colorControl === resultColor) {
+        if (resultColor === 'green') win = bet * 14;
+        else win = bet * 2;
+        userData.balance += win;
+        await saveData(data);
+        return interaction.editReply(`🎲 **روليت الكازينو!**\nالكرة استقرت على اللون: **${resultColor === 'red' ? '🔴 أحمر' : resultColor === 'black' ? '⚫ أسود' : '🟢 أخضر'}**\n🎉 **فزت بجائزة قدرها ${win.toLocaleString()} عملة!**`);
+      } else {
+        await saveData(data);
+        return interaction.editReply(`🎲 **روليت الكازينو!**\nالكرة استقرت على اللون: **${resultColor === 'red' ? '🔴 أحمر' : resultColor === 'black' ? '⚫ أسود' : '🟢 أخضر'}**\n❌ **خسرت رهانك البالغ ${bet.toLocaleString()} عملة.**`);
+      }
+    }
+
+    case 'سباق': {
+      const bet = options.getInteger('المبلغ');
+      if (bet <= 0 || userData.balance < bet) return interaction.editReply({ content: '❌ رصيدك لا يكفي!' });
+
+      let winChance = 0.45;
+      if (userData.inventory.car > 0) winChance += 0.25;
+      if (userData.job === 'driver') winChance += 0.20;
+
+      userData.balance -= bet;
+      if (Math.random() < winChance) {
+        const prize = bet * 2;
+        userData.balance += prize;
+        await saveData(data);
+        return interaction.editReply(`🏎️ **سباق الشوارع الحماسي!**\nقمت بتجاوز المنافسين ببراعة وسياراتك السريعة!\n🏆 **فزت بالسباق وكسبت ${prize.toLocaleString()} عملة!**`);
+      } else {
+        await saveData(data);
+        return interaction.editReply(`🏎️ **سباق الشوارع!**\nتعرضت لحادث مروري وتجاوزك المتسابقون!\n❌ **خسرت مبلغ الرهان (${bet.toLocaleString()} عملة).**`);
+      }
+    }
+
+    // --- فعالية السطو الكبير على البنك ---
+    case 'سطو_بنك': {
+      const now = Date.now();
+      if ((userData.jailUntil || 0) > now) return interaction.editReply({ content: '❌ أنت مسجون ولا يمكنك المشاركة في سطو البنك!' });
+
+      let chance = 0.40;
+      if (userData.inventory.smg > 0) chance += 0.20;
+      if (userData.inventory.car > 0) chance += 0.15;
+      if (userData.job === 'demo') chance += 0.20;
+
+      if (Math.random() < chance) {
+        const loot = Math.floor(Math.random() * 5000) + 3000;
+        userData.balance += loot;
+        await saveData(data);
+        return interaction.editReply(`🏦💥 **نجح اقتحام البنك المركزي بسلام!**\nاستطعت سرقة غنائم ضخمة بقيمة **${loot.toLocaleString()}** عملة وتوزيعه لحسابك! 🔥`);
+      } else {
+        userData.jailUntil = now + (10 * 60 * 1000);
+        userData.balance = Math.max(0, userData.balance - 1000);
+        await saveData(data);
+        return interaction.editReply(`🚨 **فشل سطو البنك!** حاصر الأمن المكان، وتم تغريمك 1,000 عملة وسجنك لمدة **10 دقائق**! 🚔`);
+      }
+    }
+
     case 'عقد': {
       const targetUser = options.getUser('الهدف');
       const reward = options.getInteger('المكافأة');
@@ -537,7 +698,6 @@ client.on(Events.InteractionCreate, async interaction => {
       const now = Date.now();
       if ((userData.jailUntil || 0) <= now) return interaction.editReply({ content: '❌ أنت لست مسجوناً لتنفذ العمل الشاق!' });
 
-      // تقليص دقيقتين من مدة السجن
       userData.jailUntil = Math.max(now, userData.jailUntil - (120 * 1000));
       const earned = Math.floor(Math.random() * 50) + 10;
       userData.balance += earned;
@@ -565,7 +725,6 @@ client.on(Events.InteractionCreate, async interaction => {
       userData.balance += loot;
       targetData.jailUntil = Date.now() + (15 * 60 * 1000);
 
-      // التحقق من وجود عقد مكافأة
       let bountyBonus = 0;
       if (data.bounties[targetUser.id] && data.bounties[targetUser.id] > 0) {
         bountyBonus = data.bounties[targetUser.id];
