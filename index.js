@@ -1017,7 +1017,7 @@ client.on(Events.InteractionCreate, async interaction => {
       data.gangs[userData.gang].bank = (data.gangs[userData.gang].bank || 0) + stolenAmount;
       await saveData(data);
 
-      return interaction.editReply({ content: `⚔️🔥 **هجوم عصابة ناجح وسحيق!** أغارت عصابتك [ ${userData.gang} ] على مقرات عصابة **[ ${targetGangName} ]** ونهبت **${stolenAmount.toLocaleString()} عملة** من خزينتهم لصالح خزينة عصابتكم!` });
+      return interaction.editReply({ content: `⚔️🔥 **هجوم عصابة ناجح وسحيق!** أغارت عصابتك [ ${userData.gang} ] على مقرات عصابة **[ ${targetGangName} ]** ونهبت **${stolenAmount.toLocaleString()} عملة** من خزينتهم لصالح عصابتكم!` });
     }
 
     case 'لوحة_الصدارة': {
@@ -1032,4 +1032,27 @@ client.on(Events.InteractionCreate, async interaction => {
     case 'تعويض': {
       if (!interaction.member.permissions.has('Administrator')) return interaction.editReply({ content: '❌ للمشرفين فقط!' });
       const target = options.getUser('الشخص');
-      const amt = options.
+      const amt = options.getInteger('المبلغ');
+      initUser(data, target.id);
+      data.users[target.id].balance += amt;
+      await saveData(data);
+      return interaction.editReply({ content: `✅ تم إضافة تعويض بقيمة **${amt.toLocaleString()} عملة** لـ <@${target.id}>!` });
+    }
+
+    case 'انضمام': {
+      await saveData(data);
+      return interaction.editReply({ content: '✅ تم تفعيل حسابك بنجاح!' });
+    }
+
+    default:
+      return interaction.editReply({ content: '✅ تم تنفيذ الأمر بنجاح!' });
+  }
+});
+
+const token = process.env.DISCORD_TOKEN;
+if (!token) {
+  console.error('❌ DISCORD_TOKEN غير موجود!');
+  process.exit(1);
+}
+
+client.login(token);
